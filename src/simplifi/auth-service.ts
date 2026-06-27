@@ -16,6 +16,9 @@ interface PendingMfa {
   phone?: string;
   threatMetrixSessionId: string;
   expiresAt: number;
+  // credentials held in-memory only for the duration of the connect flow
+  loginEmail?: string;
+  loginPassword?: string;
 }
 
 export type AttemptLoginResult =
@@ -24,11 +27,26 @@ export type AttemptLoginResult =
 
 export class SimplifiAuthService {
   private readonly pendingMfaMap = new Map<string, PendingMfa>();
+  private reauthCallback?: () => void;
+  private reauthDebounceTimer?: ReturnType<typeof setTimeout>;
 
   public constructor(
     private readonly config: AppConfig["simplifi"],
     private readonly db: DatabaseContext,
   ) {}
+
+  /** Register a callback that fires (at most once per 10s) when the server needs the user to reconnect. */
+  public onNeedsReauth(callback: () => void): void {
+    this.reauthCallback = callback;
+  }
+
+  private triggerReauth(): void {
+    if (this.reauthDebounceTimer) return;
+    this.reauthCallback?.();
+    this.reauthDebounceTimer = setTimeout(() => {
+      this.reauthDebounceTimer = undefined;
+    }, 10_000);
+  }
 
   public async getAccessToken(): Promise<string> {
     const cached = this.db.getSimplifiTokens();
@@ -43,15 +61,67 @@ export class SimplifiAuthService {
         this.db.saveSimplifiTokens(refreshed);
         return refreshed.accessToken;
       } catch (error) {
-        logWarn("Simplifi token refresh failed; attempting credential re-login", {
+        logWarn("Simplifi token refresh failed", {
           error: error instanceof Error ? error.message : String(error),
         });
       }
     }
 
+    // No credentials configured — browser connect flow is required.
+    if (!this.config.email || !this.config.password) {
+      this.triggerReauth();
+      throw new Error(
+        "Simplifi session expired. Please reconnect at http://localhost:8787/connect",
+      );
+    }
+
     const created = await this.loginWithCredentials();
     this.db.saveSimplifiTokens(created);
     return created.accessToken;
+  }
+
+  /**
+   * Login using explicit credentials (browser connect flow — credentials never written to disk).
+   * If MFA is required, returns a pendingId that must be resolved via completeMfaLogin().
+   */
+  public async attemptLoginWithCredentials(loginEmail: string, loginPassword: string): Promise<AttemptLoginResult> {
+    const threatMetrixSessionId = randomUUID();
+    const authorizeResponse = await this.callAuthorize({
+      email: loginEmail,
+      password: loginPassword,
+      mfaChannel: null,
+      mfaCode: null,
+      mfaId: null,
+      threatMetrixSessionId,
+      threatMetrixRequestId: null,
+    });
+
+    if (authorizeResponse.status === 202) {
+      const body = (await authorizeResponse.json()) as Record<string, unknown>;
+      const mfaId = String(body.mfaId ?? "");
+      const mfaChannel = typeof body.mfaChannel === "string" ? body.mfaChannel : "EMAIL";
+      const mfaEmailHint = typeof body.email === "string" ? body.email : undefined;
+      const phone = typeof body.phone === "string" ? body.phone : undefined;
+
+      const pendingId = randomUUID();
+      this.pendingMfaMap.set(pendingId, {
+        mfaId,
+        mfaChannel,
+        email: mfaEmailHint,
+        phone,
+        threatMetrixSessionId,
+        expiresAt: Date.now() + 10 * 60 * 1000,
+        loginEmail,
+        loginPassword,
+      });
+
+      return { status: "mfa_required", pendingId, mfaChannel, email: mfaEmailHint, phone };
+    }
+
+    const token = await this.processSuccessfulAuthorize(authorizeResponse);
+    this.db.saveSimplifiTokens(token);
+    logInfo("Simplifi browser connect login completed");
+    return { status: "ok" };
   }
 
   /**
@@ -134,6 +204,8 @@ export class SimplifiAuthService {
     }
 
     const authorizeResponse = await this.callAuthorize({
+      email: pending.loginEmail,
+      password: pending.loginPassword,
       mfaChannel: pending.mfaChannel,
       mfaCode,
       mfaId: pending.mfaId,
@@ -190,6 +262,8 @@ export class SimplifiAuthService {
   }
 
   private async callAuthorize(opts: {
+    email?: string;
+    password?: string;
     mfaChannel: string | null;
     mfaCode: string | null;
     mfaId: string | null;
@@ -202,8 +276,8 @@ export class SimplifiAuthService {
       method: "POST",
       body: JSON.stringify({
         clientId: this.config.clientId,
-        username: this.config.email,
-        password: this.config.password,
+        username: opts.email ?? this.config.email,
+        password: opts.password ?? this.config.password,
         redirectUri: this.config.redirectUri,
         responseType: "code",
         mfaChannel: opts.mfaChannel,

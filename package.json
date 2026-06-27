@@ -6,6 +6,7 @@
   "packageManager": "yarn@1.22.22",
   "description": "Single-user MCP server for Quicken Simplifi transactions with OAuth2, local cache, and automatic sync.",
   "scripts": {
+    "setup": "tsx src/setup.ts",
     "dev": "tsx watch src/index.ts",
     "build": "tsc --pretty",
     "start": "node dist/index.js",

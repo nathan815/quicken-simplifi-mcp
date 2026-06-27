@@ -22,12 +22,13 @@ export interface AppConfig {
     loginUsername: string;
     loginPassword: string;
     allowedRedirectUris: string[];
+    staticApiKey?: string;
   };
   simplifi: {
     baseUrl: string;
-    email: string;
-    password: string;
-    datasetId: string;
+    email?: string;
+    password?: string;
+    datasetId?: string;
     clientId: string;
     clientSecret: string;
     redirectUri: string;
@@ -46,6 +47,11 @@ function getEnv(name: string, fallback?: string): string {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value;
+}
+
+function getOptionalEnv(name: string): string | undefined {
+  const value = process.env[name];
+  return value && value.trim() ? value.trim() : undefined;
 }
 
 function getNumberEnv(name: string, fallback: number): number {
@@ -92,18 +98,19 @@ export function loadConfig(): AppConfig {
     oauth: {
       issuer: process.env.OAUTH_ISSUER ?? publicBaseUrl,
       audience: process.env.OAUTH_AUDIENCE ?? "simplifi-mcp",
-      jwtSecret: getEnv("OAUTH_JWT_SECRET"),
+      jwtSecret: getOptionalEnv("OAUTH_JWT_SECRET") ?? "unused-when-static-api-key-is-set",
       accessTokenTtlSeconds: getNumberEnv("OAUTH_ACCESS_TOKEN_TTL_SECONDS", 900),
       refreshTokenTtlSeconds: getNumberEnv("OAUTH_REFRESH_TOKEN_TTL_SECONDS", 60 * 60 * 24 * 30),
-      loginUsername: getEnv("OAUTH_LOGIN_USERNAME"),
-      loginPassword: getEnv("OAUTH_LOGIN_PASSWORD"),
+      loginUsername: getOptionalEnv("OAUTH_LOGIN_USERNAME") ?? "admin",
+      loginPassword: getOptionalEnv("OAUTH_LOGIN_PASSWORD") ?? "",
       allowedRedirectUris: parseRedirectAllowlist(process.env.OAUTH_ALLOWED_REDIRECT_URIS ?? ""),
+      staticApiKey: getOptionalEnv("MCP_API_KEY"),
     },
     simplifi: {
       baseUrl: process.env.SIMPLIFI_BASE_URL ?? "https://services.quicken.com",
-      email: getEnv("SIMPLIFI_EMAIL"),
-      password: getEnv("SIMPLIFI_PASSWORD"),
-      datasetId: getEnv("SIMPLIFI_DATASET_ID"),
+      email: getOptionalEnv("SIMPLIFI_EMAIL"),
+      password: getOptionalEnv("SIMPLIFI_PASSWORD"),
+      datasetId: getOptionalEnv("SIMPLIFI_DATASET_ID"),
       clientId: process.env.SIMPLIFI_CLIENT_ID ?? "acme_web",
       clientSecret: process.env.SIMPLIFI_CLIENT_SECRET ?? "BCDCxXwdWYcj@bK6",
       redirectUri: process.env.SIMPLIFI_REDIRECT_URI ?? "https://simplifi.quicken.com/login",

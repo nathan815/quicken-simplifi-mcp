@@ -203,6 +203,11 @@ export class DatabaseContext {
       );
       CREATE INDEX IF NOT EXISTS idx_tags_name ON tags (name);
 
+      CREATE TABLE IF NOT EXISTS simplifi_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS reference_sync_state (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         categories_last_as_of TEXT,
@@ -279,6 +284,15 @@ export class DatabaseContext {
         refreshTokenExpiresAt: tokens.refreshTokenExpiresAt ?? null,
         updatedAt: nowIso(),
       });
+  }
+
+  public getDatasetId(): string | null {
+    const row = this.db.prepare(`SELECT value FROM simplifi_config WHERE key = 'dataset_id'`).get() as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  public saveDatasetId(id: string): void {
+    this.db.prepare(`INSERT INTO simplifi_config (key, value) VALUES ('dataset_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(id);
   }
 
   public getSyncState(): SyncState {
@@ -962,6 +976,37 @@ export class DatabaseContext {
           .all(limit) as TagRow[]));
 
     return rows.map((row) => JSON.parse(row.raw_json) as Tag);
+  }
+
+  public listTransactionsByTag(query: TransactionQuery & { tagId: string }): TransactionPage {
+    const offset = decodeCursor(query.cursor);
+    const limit = Math.min(Math.max(query.limit, 1), 200);
+
+    const where: string[] = [
+      `EXISTS (
+        SELECT 1 FROM json_each(transactions.raw_json, '$.tags') AS tag_item
+        WHERE json_extract(tag_item.value, '$.id') = ?
+      )`,
+    ];
+    const values: unknown[] = [query.tagId];
+
+    if (query.accountId) { where.push("account_id = ?"); values.push(query.accountId); }
+    if (query.dateFrom) { where.push("posted_on >= ?"); values.push(query.dateFrom); }
+    if (query.dateTo) { where.push("posted_on <= ?"); values.push(query.dateTo); }
+    if (typeof query.minAmount === "number") { where.push("amount >= ?"); values.push(query.minAmount); }
+    if (typeof query.maxAmount === "number") { where.push("amount <= ?"); values.push(query.maxAmount); }
+    if (!query.includeDeleted) { where.push("is_deleted = 0"); }
+
+    const whereClause = `WHERE ${where.join(" AND ")}`;
+    const total = (this.db.prepare(`SELECT COUNT(*) AS count FROM transactions ${whereClause}`).get(...values) as CountRow).count;
+
+    const rows = this.db
+      .prepare(`SELECT raw_json FROM transactions ${whereClause} ORDER BY posted_on DESC, id DESC LIMIT ? OFFSET ?`)
+      .all(...values, limit + 1, offset) as TransactionRow[];
+
+    const hasNext = rows.length > limit;
+    const items = rows.slice(0, limit).map((row) => JSON.parse(row.raw_json) as Transaction);
+    return { items, total, nextCursor: hasNext ? encodeCursor(offset + limit) : undefined };
   }
 
   public searchMerchants(query: { q: string; limit?: number; includeDeleted?: boolean }): Array<{ merchant: string; count: number }> {

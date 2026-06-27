@@ -1,5 +1,5 @@
 import { DatabaseContext, type TransactionQuery } from "../db/database.js";
-import type { Transaction, TransactionFilters } from "../types.js";
+import type { Tag, TagRef, Transaction, TransactionFilters } from "../types.js";
 import { deepMerge } from "../utils.js";
 import { SimplifiClient } from "../simplifi/client.js";
 import { SyncService } from "../sync/sync-service.js";
@@ -174,6 +174,99 @@ export class TransactionToolService {
 
     const tags = this.db.listTags({ search: input.query, limit: input.limit });
     return { tags };
+  }
+
+  public async tagTransaction(input: { transactionId: string; tagIds: string[] }): Promise<Record<string, unknown>> {
+    await this.syncService.ensureFresh(this.maxStaleMs);
+
+    const current = this.db.getTransactionById(input.transactionId);
+    if (!current) {
+      throw new Error(`Transaction ${input.transactionId} not found in cache`);
+    }
+
+    const knownTags = this.db.listTags({});
+    const tagMap = new Map<string, Tag>(knownTags.map((t) => [t.id!, t]));
+
+    const existingIds = new Set((current.tags ?? []).map((t: TagRef) => t.id));
+    const newTagRefs: TagRef[] = input.tagIds
+      .filter((id) => !existingIds.has(id))
+      .map((id) => {
+        const tag = tagMap.get(id);
+        return tag ? { id: tag.id!, name: tag.name } : { id };
+      });
+
+    return this.updateTransaction({
+      transactionId: input.transactionId,
+      patch: { tags: [...(current.tags ?? []), ...newTagRefs] },
+    });
+  }
+
+  public async untagTransaction(input: { transactionId: string; tagIds: string[] }): Promise<Record<string, unknown>> {
+    await this.syncService.ensureFresh(this.maxStaleMs);
+
+    const current = this.db.getTransactionById(input.transactionId);
+    if (!current) {
+      throw new Error(`Transaction ${input.transactionId} not found in cache`);
+    }
+
+    const removeSet = new Set(input.tagIds);
+    const updatedTags = (current.tags ?? []).filter((t: TagRef) => !removeSet.has(t.id));
+
+    return this.updateTransaction({
+      transactionId: input.transactionId,
+      patch: { tags: updatedTags },
+    });
+  }
+
+  public async setTransactionTags(input: { transactionId: string; tagIds: string[] }): Promise<Record<string, unknown>> {
+    await this.referenceDataService.ensureTagsFresh(this.maxStaleMs);
+
+    const knownTags = this.db.listTags({});
+    const tagMap = new Map<string, Tag>(knownTags.map((t) => [t.id!, t]));
+
+    const tagRefs: TagRef[] = input.tagIds.map((id) => {
+      const tag = tagMap.get(id);
+      return tag ? { id: tag.id!, name: tag.name } : { id };
+    });
+
+    return this.updateTransaction({
+      transactionId: input.transactionId,
+      patch: { tags: tagRefs },
+    });
+  }
+
+  public async setTransactionMemo(input: { transactionId: string; memo: string }): Promise<Record<string, unknown>> {
+    return this.updateTransaction({
+      transactionId: input.transactionId,
+      patch: { memo: input.memo },
+    });
+  }
+
+  public async listTransactionsByTag(
+    input: { tagId?: string; tagName?: string } & ListTransactionsInput,
+  ): Promise<Record<string, unknown>> {
+    await this.maybeRefresh(input.refresh ?? false);
+    await this.referenceDataService.ensureTagsFresh(this.maxStaleMs);
+
+    let resolvedTagId = input.tagId;
+    if (!resolvedTagId && input.tagName) {
+      const match = this.db.listTags({ search: input.tagName, limit: 1 })[0];
+      if (!match?.id) {
+        throw new Error(`Tag not found: ${input.tagName}`);
+      }
+      resolvedTagId = match.id;
+    }
+
+    if (!resolvedTagId) {
+      throw new Error("Either tagId or tagName is required");
+    }
+
+    const page = this.db.listTransactionsByTag({ ...this.toQuery(input), tagId: resolvedTagId });
+    return {
+      total: page.total,
+      nextCursor: page.nextCursor,
+      items: page.items,
+    };
   }
 
   public async suggestCategoriesForMerchant(input: {

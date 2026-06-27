@@ -1,7 +1,8 @@
+import { exec } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { DatabaseContext } from "./db/database.js";
 import { startHttpServer } from "./http/server.js";
-import { logError, logInfo } from "./logger.js";
+import { logError, logInfo, logWarn } from "./logger.js";
 import { OAuthService } from "./oauth/oauth-service.js";
 import { TransactionToolService } from "./services/transaction-tool-service.js";
 import { ReferenceDataService } from "./services/reference-data-service.js";
@@ -15,7 +16,12 @@ async function main(): Promise<void> {
   const oauthService = new OAuthService(config.oauth, db);
 
   const simplifiAuthService = new SimplifiAuthService(config.simplifi, db);
-  const simplifiClient = new SimplifiClient(config.simplifi, simplifiAuthService);
+  const simplifiClient = new SimplifiClient(
+    config.simplifi,
+    simplifiAuthService,
+    () => db.getDatasetId(),
+    (id) => db.saveDatasetId(id),
+  );
   const syncService = new SyncService(config.simplifi, db, simplifiClient);
 
   // Warm cache once in background; server startup should remain fast.
@@ -39,8 +45,28 @@ async function main(): Promise<void> {
     config,
     oauthService,
     simplifiAuthService,
+    simplifiClient,
     toolService,
+    hasSimplifiTokens: () => db.getSimplifiTokens() !== null,
   });
+
+  function openConnectPage(): void {
+    const connectUrl = `${config.server.publicBaseUrl}/connect`;
+    logInfo("Opening browser to Simplifi connect page", { url: connectUrl });
+    console.log(`\n🔗  Open this URL to connect your Simplifi account:\n    ${connectUrl}\n`);
+    const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
+    exec(`${openCmd} "${connectUrl}"`, (err) => {
+      if (err) logWarn("Could not open browser automatically", { error: err.message });
+    });
+  }
+
+  // Open browser whenever the session expires and needs reconnecting.
+  simplifiAuthService.onNeedsReauth(openConnectPage);
+
+  // Also open immediately on first run (no tokens yet).
+  if (!db.getSimplifiTokens()) {
+    openConnectPage();
+  }
 
   const shutdown = async (signal: string): Promise<void> => {
     logInfo("Shutting down", { signal });

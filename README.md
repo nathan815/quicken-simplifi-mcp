@@ -13,6 +13,11 @@ It provides MCP tools:
 - `list_categories` / `search_categories`
 - `list_tags` / `search_tags`
 - `suggest_categories_for_merchant`
+- `tag_transaction` — add tags to a transaction (merges, does not remove existing)
+- `untag_transaction` — remove specific tags from a transaction
+- `set_transaction_tags` — replace all tags on a transaction
+- `set_transaction_memo` — set or clear the memo/note on a transaction
+- `list_transactions_by_tag` — list transactions filtered by tag ID or name
 
 It includes:
 - local transaction cache (SQLite)
@@ -194,6 +199,37 @@ Inputs:
 - `refreshCategories` (optional)
 
 Returns the most common categories historically used for that merchant in your cached transactions (joined to category names when available).
+
+### `tag_transaction`
+Inputs:
+- `transactionId` (required)
+- `tagIds` (required string array — list of tag IDs to add)
+
+Adds tags to a transaction without removing any existing tags. Use `list_tags` to get tag IDs first.
+
+### `untag_transaction`
+Inputs:
+- `transactionId` (required)
+- `tagIds` (required string array — tag IDs to remove)
+
+### `set_transaction_tags`
+Inputs:
+- `transactionId` (required)
+- `tagIds` (required string array — exact set of tag IDs; pass `[]` to clear all tags)
+
+Replaces all tags on a transaction with the provided list.
+
+### `set_transaction_memo`
+Inputs:
+- `transactionId` (required)
+- `memo` (required string; pass `""` to clear the memo)
+
+### `list_transactions_by_tag`
+Inputs:
+- `tagId` OR `tagName` (one required)
+- same optional filters as `list_transactions`
+
+Returns transactions that have the specified tag applied. Uses SQLite `json_each` to query the tags array in cached JSON.
 
 ## Production Deployment
 

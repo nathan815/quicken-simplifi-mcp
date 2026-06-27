@@ -185,6 +185,80 @@ export function createMcpServer(toolService: TransactionToolService): McpServer 
   );
 
   mcp.tool(
+    "tag_transaction",
+    "Add one or more tags to a transaction (merges with existing tags, does not remove others).",
+    {
+      transactionId: z.string().min(1),
+      tagIds: z.array(z.string().min(1)).min(1),
+    },
+    async (input: any) => {
+      const result = await toolService.tagTransaction(input);
+      return toToolResponse(result);
+    },
+  );
+
+  mcp.tool(
+    "untag_transaction",
+    "Remove one or more tags from a transaction by their tag IDs.",
+    {
+      transactionId: z.string().min(1),
+      tagIds: z.array(z.string().min(1)).min(1),
+    },
+    async (input: any) => {
+      const result = await toolService.untagTransaction(input);
+      return toToolResponse(result);
+    },
+  );
+
+  mcp.tool(
+    "set_transaction_tags",
+    "Replace all tags on a transaction with exactly the provided tag IDs (overwrites existing tags).",
+    {
+      transactionId: z.string().min(1),
+      tagIds: z.array(z.string()),
+    },
+    async (input: any) => {
+      const result = await toolService.setTransactionTags(input);
+      return toToolResponse(result);
+    },
+  );
+
+  mcp.tool(
+    "set_transaction_memo",
+    "Set the memo/note text on a transaction. Pass an empty string to clear the memo.",
+    {
+      transactionId: z.string().min(1),
+      memo: z.string(),
+    },
+    async (input: any) => {
+      const result = await toolService.setTransactionMemo(input);
+      return toToolResponse(result);
+    },
+  );
+
+  mcp.tool(
+    "list_transactions_by_tag",
+    "List transactions that have a specific tag applied, identified by tagId or tagName.",
+    {
+      tagId: z.string().optional(),
+      tagName: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(200).optional(),
+      cursor: z.string().optional(),
+      accountId: z.string().optional(),
+      dateFrom: z.string().optional(),
+      dateTo: z.string().optional(),
+      minAmount: z.number().optional(),
+      maxAmount: z.number().optional(),
+      includeDeleted: z.boolean().optional(),
+      refresh: z.boolean().optional(),
+    },
+    async (input: any) => {
+      const result = await toolService.listTransactionsByTag(input);
+      return toToolResponse(result);
+    },
+  );
+
+  mcp.tool(
     "suggest_categories_for_merchant",
     "Suggest likely categories for a merchant based on your historical transactions in the local cache.",
     {

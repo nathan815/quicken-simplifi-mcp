@@ -97,12 +97,13 @@ export class TransactionToolService {
 
     const mutation = await this.simplifiClient.updateTransaction(input.transactionId, merged);
 
-    await this.syncService.syncIncremental();
-    const updated = this.db.getTransactionById(input.transactionId) ?? merged;
+    // Write the merged state directly to cache rather than triggering a full
+    // incremental sync — avoids N concurrent syncs when bulk-tagging transactions.
+    this.db.upsertTransactions([merged]);
 
     return {
       mutation,
-      transaction: updated,
+      transaction: merged,
     };
   }
 
@@ -152,6 +153,13 @@ export class TransactionToolService {
 
     const categories = this.db.listCategories({ search: input.query, limit: input.limit });
     return { categories };
+  }
+
+  public async createTag(input: { name: string }): Promise<Record<string, unknown>> {
+    const tag = await this.simplifiClient.createTag(input.name.trim());
+    // Persist to local cache so it's immediately available for tagging tools.
+    this.db.upsertTags([tag]);
+    return { tag };
   }
 
   public async listTags(input?: { refresh?: boolean; limit?: number }): Promise<Record<string, unknown>> {

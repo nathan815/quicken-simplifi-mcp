@@ -20,6 +20,7 @@ interface HttpServerDeps {
   simplifiClient: SimplifiClient;
   toolService: TransactionToolService;
   hasSimplifiTokens: () => boolean;
+  notifyActivity: () => void;
 }
 
 export interface RunningHttpServer {
@@ -355,7 +356,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
 
     try {
       if (!transport) {
-        const mcpServer = createMcpServer(toolService);
+        const mcpServer = createMcpServer(toolService, deps.notifyActivity);
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           onsessioninitialized: (newSessionId: string) => {

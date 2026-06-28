@@ -48,6 +48,7 @@ async function main(): Promise<void> {
     simplifiClient,
     toolService,
     hasSimplifiTokens: () => db.getSimplifiTokens() !== null,
+    notifyActivity: () => syncService.notifyActivity(),
   });
 
   function openConnectPage(): void {

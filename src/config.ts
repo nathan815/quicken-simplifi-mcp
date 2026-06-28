@@ -36,6 +36,8 @@ export interface AppConfig {
     threatMetrixRequestId?: string;
     httpTimeoutMs: number;
     syncIntervalMs: number;
+    idleSyncIntervalMs: number;
+    activeWindowMs: number;
     maxStaleMs: number;
     pageLimit: number;
   };
@@ -118,6 +120,8 @@ export function loadConfig(): AppConfig {
       threatMetrixRequestId: process.env.SIMPLIFI_THREAT_METRIX_REQUEST_ID,
       httpTimeoutMs: getNumberEnv("SIMPLIFI_HTTP_TIMEOUT_MS", 30_000),
       syncIntervalMs: getNumberEnv("SIMPLIFI_SYNC_INTERVAL_MS", 60_000),
+    idleSyncIntervalMs: getNumberEnv("SIMPLIFI_IDLE_SYNC_INTERVAL_MS", 10 * 60_000),
+    activeWindowMs: getNumberEnv("SIMPLIFI_ACTIVE_WINDOW_MS", 5 * 60_000),
       maxStaleMs: getNumberEnv("SIMPLIFI_MAX_STALE_MS", 120_000),
       pageLimit: getNumberEnv("SIMPLIFI_PAGE_LIMIT", 5000),
     },

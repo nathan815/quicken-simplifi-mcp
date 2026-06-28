@@ -5,6 +5,7 @@ import type {
   CategoryListResponse,
   DatasetListResponse,
   EarliestDateOnResponse,
+  Tag,
   TagListResponse,
   Transaction,
   TransactionListResponse,
@@ -122,6 +123,14 @@ export class SimplifiClient {
   public async listCategoriesFromNextLink(nextLink: string): Promise<CategoryListResponse> {
     const url = new URL(nextLink, this.config.baseUrl);
     return this.authedRequest<CategoryListResponse>(url.toString(), { method: "GET" });
+  }
+
+  public async createTag(name: string): Promise<Tag> {
+    const url = new URL("/tags", this.config.baseUrl);
+    return this.authedRequest<Tag>(url.toString(), {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
   }
 
   public async listTags(input: ListReferenceInput = {}): Promise<TagListResponse> {

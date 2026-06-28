@@ -12,8 +12,9 @@ export interface SyncResult {
 }
 
 export class SyncService {
-  private intervalHandle: NodeJS.Timeout | null = null;
+  private timerHandle: NodeJS.Timeout | null = null;
   private activeSync: Promise<SyncResult> | null = null;
+  private lastActivityAt = 0;
 
   public constructor(
     private readonly config: AppConfig["simplifi"],
@@ -21,25 +22,36 @@ export class SyncService {
     private readonly client: SimplifiClient,
   ) {}
 
+  public notifyActivity(): void {
+    this.lastActivityAt = Date.now();
+  }
+
   public start(): void {
-    if (this.intervalHandle) {
+    if (this.timerHandle) {
       return;
     }
-
-    this.intervalHandle = setInterval(() => {
-      void this.syncIncremental().catch((error: unknown) => {
-        logError("Background incremental sync failed", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    }, this.config.syncIntervalMs);
+    this.scheduleNext();
   }
 
   public stop(): void {
-    if (this.intervalHandle) {
-      clearInterval(this.intervalHandle);
-      this.intervalHandle = null;
+    if (this.timerHandle) {
+      clearTimeout(this.timerHandle);
+      this.timerHandle = null;
     }
+  }
+
+  private scheduleNext(): void {
+    const isActive = Date.now() - this.lastActivityAt < this.config.activeWindowMs;
+    const delay = isActive ? this.config.syncIntervalMs : this.config.idleSyncIntervalMs;
+    this.timerHandle = setTimeout(() => {
+      void this.syncIncremental()
+        .catch((error: unknown) => {
+          logError("Background incremental sync failed", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        })
+        .finally(() => this.scheduleNext());
+    }, delay);
   }
 
   public async ensureInitialized(): Promise<SyncResult> {

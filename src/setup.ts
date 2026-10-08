@@ -61,8 +61,8 @@ function main() {
   console.log("       yarn build && yarn start\n");
   console.log("  2. Sign in to your Simplifi account in the browser.\n");
   console.log("  3. Add the MCP to Claude Code:");
-  console.log(`       claude mcp add simplifi --transport http http://localhost:8787/mcp \\`);
-  console.log(`         --header "Authorization: Bearer ${apiKey}"\n`);
+  console.log("       claude mcp add simplifi --transport http http://localhost:8787/mcp");
+  console.log("       Configure bearer authentication with the MCP_API_KEY value from .env.\n");
   console.log("  4. Start chatting about your finances!\n");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 }

@@ -3,6 +3,7 @@ import type { AddressInfo } from "node:net";
 
 import cors from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
+import rateLimit from "express-rate-limit";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 
 import type { AppConfig } from "../config.js";
@@ -280,6 +281,24 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
 </div></body></html>`;
   }
 
+  function requireConnectNonce(req: Request, res: Response, next: NextFunction): void {
+    if (!isValidConnectNonce(req.body.connect_nonce)) {
+      res.status(403).type("html").send(connectPage({ error: "Invalid or expired connection request. Reload this page." }));
+      return;
+    }
+    next();
+  }
+
+  const connectRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 5,
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (_req, res) => {
+      res.status(429).type("text/plain").send("Too many connection attempts. Try again later.");
+    },
+  });
+
   app.get("/connect", (_req, res) => {
     if (isReady()) {
       res.status(200).type("html").send(connectPage({ success: true }));
@@ -288,12 +307,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     res.status(200).type("html").send(connectPage());
   });
 
-  app.post("/connect", async (req, res) => {
-    if (!isValidConnectNonce(req.body.connect_nonce)) {
-      res.status(403).type("html").send(connectPage({ error: "Invalid or expired connection request. Reload this page." }));
-      return;
-    }
-
+  app.post("/connect", requireConnectNonce, connectRateLimit, async (req, res) => {
     const email = typeof req.body.email === "string" ? req.body.email.trim() : "";
     const password = typeof req.body.password === "string" ? req.body.password : "";
 
@@ -330,12 +344,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     }
   });
 
-  app.post("/connect/mfa", async (req, res) => {
-    if (!isValidConnectNonce(req.body.connect_nonce)) {
-      res.status(403).type("html").send(connectPage({ error: "Invalid or expired connection request. Reload this page." }));
-      return;
-    }
-
+  app.post("/connect/mfa", requireConnectNonce, connectRateLimit, async (req, res) => {
     const pendingId = typeof req.body.pending_id === "string" ? req.body.pending_id : "";
     const mfaCode = typeof req.body.mfa_code === "string" ? req.body.mfa_code.trim() : "";
 

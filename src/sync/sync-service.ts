@@ -15,6 +15,8 @@ export class SyncService {
   private timerHandle: NodeJS.Timeout | null = null;
   private activeSync: Promise<SyncResult> | null = null;
   private lastActivityAt = 0;
+  private started = false;
+  private timerCallbackRunning = false;
 
   public constructor(
     private readonly config: AppConfig["simplifi"],
@@ -23,17 +25,24 @@ export class SyncService {
   ) {}
 
   public notifyActivity(): void {
+    const wasActive = Date.now() - this.lastActivityAt < this.config.activeWindowMs;
     this.lastActivityAt = Date.now();
+    if (!wasActive && this.started && !this.timerCallbackRunning) {
+      if (this.timerHandle) clearTimeout(this.timerHandle);
+      this.scheduleNext();
+    }
   }
 
   public start(): void {
-    if (this.timerHandle) {
+    if (this.started) {
       return;
     }
-    this.scheduleNext();
+    this.started = true;
+    if (!this.timerCallbackRunning) this.scheduleNext();
   }
 
   public stop(): void {
+    this.started = false;
     if (this.timerHandle) {
       clearTimeout(this.timerHandle);
       this.timerHandle = null;
@@ -41,16 +50,22 @@ export class SyncService {
   }
 
   private scheduleNext(): void {
+    if (!this.started) return;
     const isActive = Date.now() - this.lastActivityAt < this.config.activeWindowMs;
     const delay = isActive ? this.config.syncIntervalMs : this.config.idleSyncIntervalMs;
     this.timerHandle = setTimeout(() => {
+      this.timerHandle = null;
+      this.timerCallbackRunning = true;
       void this.syncIncremental()
         .catch((error: unknown) => {
           logError("Background incremental sync failed", {
             error: error instanceof Error ? error.message : String(error),
           });
         })
-        .finally(() => this.scheduleNext());
+        .finally(() => {
+          this.timerCallbackRunning = false;
+          if (this.started) this.scheduleNext();
+        });
     }, delay);
   }
 

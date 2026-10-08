@@ -257,6 +257,10 @@ export class DatabaseContext {
     };
   }
 
+  public deleteSimplifiTokens(): void {
+    this.db.prepare("DELETE FROM simplifi_tokens WHERE id = 1").run();
+  }
+
   public saveSimplifiTokens(tokens: SimplifiTokenSet): void {
     this.db
       .prepare(

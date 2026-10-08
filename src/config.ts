@@ -84,6 +84,7 @@ export function loadConfig(): AppConfig {
   const port = getNumberEnv("PORT", 8787);
   const host = process.env.HOST ?? "0.0.0.0";
   const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://localhost:${port}`;
+  const staticApiKey = getOptionalEnv("MCP_API_KEY");
 
   const cacheDbPath = path.resolve(process.cwd(), process.env.CACHE_DB_PATH ?? "./data/cache.sqlite");
 
@@ -100,13 +101,19 @@ export function loadConfig(): AppConfig {
     oauth: {
       issuer: process.env.OAUTH_ISSUER ?? publicBaseUrl,
       audience: process.env.OAUTH_AUDIENCE ?? "simplifi-mcp",
-      jwtSecret: getOptionalEnv("OAUTH_JWT_SECRET") ?? "unused-when-static-api-key-is-set",
+      jwtSecret: staticApiKey
+        ? getOptionalEnv("OAUTH_JWT_SECRET") ?? "unused-when-static-api-key-is-set"
+        : getEnv("OAUTH_JWT_SECRET"),
       accessTokenTtlSeconds: getNumberEnv("OAUTH_ACCESS_TOKEN_TTL_SECONDS", 900),
       refreshTokenTtlSeconds: getNumberEnv("OAUTH_REFRESH_TOKEN_TTL_SECONDS", 60 * 60 * 24 * 30),
-      loginUsername: getOptionalEnv("OAUTH_LOGIN_USERNAME") ?? "admin",
-      loginPassword: getOptionalEnv("OAUTH_LOGIN_PASSWORD") ?? "",
+      loginUsername: staticApiKey
+        ? getOptionalEnv("OAUTH_LOGIN_USERNAME") ?? "admin"
+        : getEnv("OAUTH_LOGIN_USERNAME"),
+      loginPassword: staticApiKey
+        ? getOptionalEnv("OAUTH_LOGIN_PASSWORD") ?? ""
+        : getEnv("OAUTH_LOGIN_PASSWORD"),
       allowedRedirectUris: parseRedirectAllowlist(process.env.OAUTH_ALLOWED_REDIRECT_URIS ?? ""),
-      staticApiKey: getOptionalEnv("MCP_API_KEY"),
+      staticApiKey,
     },
     simplifi: {
       baseUrl: process.env.SIMPLIFI_BASE_URL ?? "https://services.quicken.com",

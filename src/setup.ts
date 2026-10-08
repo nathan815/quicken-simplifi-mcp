@@ -11,10 +11,9 @@ import { writeFileSync, existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ENV_PATH = resolve(process.cwd(), ".env");
-const EXAMPLE_PATH = resolve(process.cwd(), ".env.example");
 
 function mergeEnv(existing: string, updates: Record<string, string>): string {
-  const lines = existing.split("\n");
+  const lines = existing ? existing.split("\n") : [];
   const remaining = new Set(Object.keys(updates));
 
   const merged = lines.map((line) => {
@@ -40,9 +39,7 @@ function main() {
 
   const existing = existsSync(ENV_PATH)
     ? readFileSync(ENV_PATH, "utf8")
-    : existsSync(EXAMPLE_PATH)
-      ? readFileSync(EXAMPLE_PATH, "utf8")
-      : "";
+    : "";
 
   // Check if an API key already exists
   const existingKey = existing.match(/^MCP_API_KEY=(.+)$/m)?.[1]?.trim();
@@ -61,7 +58,7 @@ function main() {
   console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
   console.log("Next steps:\n");
   console.log("  1. Start the server (a browser window will open to sign in):");
-  console.log("       yarn start\n");
+  console.log("       yarn build && yarn start\n");
   console.log("  2. Sign in to your Simplifi account in the browser.\n");
   console.log("  3. Add the MCP to Claude Code:");
   console.log(`       claude mcp add simplifi --transport http http://localhost:8787/mcp \\`);

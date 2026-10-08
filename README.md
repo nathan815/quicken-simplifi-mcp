@@ -12,6 +12,7 @@ It provides MCP tools:
 - `search_merchants`
 - `list_categories` / `search_categories`
 - `list_tags` / `search_tags`
+- `create_tag` — create a Simplifi tag
 - `suggest_categories_for_merchant`
 - `tag_transaction` — add tags to a transaction (merges, does not remove existing)
 - `untag_transaction` — remove specific tags from a transaction
@@ -190,6 +191,12 @@ Inputs:
 - `query` (required)
 - `refresh` (optional)
 - `limit` (optional, 1-5000)
+
+### `create_tag`
+Inputs:
+- `name` (required)
+
+Creates a new Simplifi tag.
 
 ### `suggest_categories_for_merchant`
 Inputs:

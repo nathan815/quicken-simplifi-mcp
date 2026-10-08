@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { AddressInfo } from "node:net";
 
 import cors from "cors";
@@ -10,6 +10,7 @@ import { logInfo, logWarn } from "../logger.js";
 import { createMcpServer } from "../mcp/server.js";
 import { OAuthService } from "../oauth/oauth-service.js";
 import { SimplifiAuthService } from "../simplifi/auth-service.js";
+import type { AttemptLoginResult } from "../simplifi/auth-service.js";
 import { SimplifiClient } from "../simplifi/client.js";
 import { TransactionToolService } from "../services/transaction-tool-service.js";
 
@@ -19,7 +20,8 @@ interface HttpServerDeps {
   simplifiAuthService: SimplifiAuthService;
   simplifiClient: SimplifiClient;
   toolService: TransactionToolService;
-  hasSimplifiTokens: () => boolean;
+  isReady: () => boolean;
+  initializeSync: () => Promise<unknown>;
   notifyActivity: () => void;
 }
 
@@ -50,10 +52,27 @@ function readBearerToken(req: Request): string | null {
 }
 
 export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttpServer> {
-  const { config, oauthService, simplifiAuthService, simplifiClient, toolService, hasSimplifiTokens } = deps;
+  const { config, oauthService, simplifiAuthService, simplifiClient, toolService, isReady, initializeSync } = deps;
 
   const app = express();
   const sessions = new Map<string, StreamableHTTPServerTransport>();
+  let connectNonce = randomBytes(32).toString("hex");
+  let connectNonceExpiresAt = Date.now() + 15 * 60 * 1000;
+
+  function currentConnectNonce(): string {
+    if (Date.now() >= connectNonceExpiresAt) {
+      connectNonce = randomBytes(32).toString("hex");
+      connectNonceExpiresAt = Date.now() + 15 * 60 * 1000;
+    }
+    return connectNonce;
+  }
+
+  function isValidConnectNonce(value: unknown): boolean {
+    if (typeof value !== "string" || Date.now() >= connectNonceExpiresAt) return false;
+    const submitted = Buffer.from(value);
+    const expected = Buffer.from(connectNonce);
+    return submitted.length === expected.length && timingSafeEqual(submitted, expected);
+  }
 
   app.disable("x-powered-by");
   app.use(
@@ -62,6 +81,11 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
       credentials: false,
     }),
   );
+  app.use("/connect", (_req, res, next) => {
+    res.removeHeader("Access-Control-Allow-Origin");
+    res.removeHeader("Access-Control-Allow-Credentials");
+    next();
+  });
   app.use(express.json({ limit: "2mb" }));
   app.use(express.urlencoded({ extended: false }));
 
@@ -222,6 +246,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
   <p class="sub">A code was sent to your ${escapeHtml(opts.mfa.channel)}${hint}.</p>
   ${err}
   <form method="POST" action="/connect/mfa">
+    <input type="hidden" name="connect_nonce" value="${currentConnectNonce()}">
     <input type="hidden" name="pending_id" value="${escapeHtml(opts.mfa.pendingId)}">
     <div class="field">
       <label>Verification code</label>
@@ -241,6 +266,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
   <div class="notice">🔒 Your credentials are sent directly to Quicken and are never stored on disk. Only the resulting session token is saved locally.</div>
   ${err}
   <form method="POST" action="/connect">
+    <input type="hidden" name="connect_nonce" value="${currentConnectNonce()}">
     <div class="field">
       <label>Email</label>
       <input type="email" name="email" autocomplete="email" autofocus required placeholder="you@example.com">
@@ -255,7 +281,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
   }
 
   app.get("/connect", (_req, res) => {
-    if (hasSimplifiTokens()) {
+    if (isReady()) {
       res.status(200).type("html").send(connectPage({ success: true }));
       return;
     }
@@ -263,6 +289,11 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
   });
 
   app.post("/connect", async (req, res) => {
+    if (!isValidConnectNonce(req.body.connect_nonce)) {
+      res.status(403).type("html").send(connectPage({ error: "Invalid or expired connection request. Reload this page." }));
+      return;
+    }
+
     const email = typeof req.body.email === "string" ? req.body.email.trim() : "";
     const password = typeof req.body.password === "string" ? req.body.password : "";
 
@@ -271,27 +302,40 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
       return;
     }
 
+    let result: AttemptLoginResult;
     try {
-      const result = await simplifiAuthService.attemptLoginWithCredentials(email, password);
-
-      if (result.status === "mfa_required") {
-        res.status(200).type("html").send(
-          connectPage({ mfa: { pendingId: result.pendingId, channel: result.mfaChannel, hint: result.email } }),
-        );
-        return;
-      }
-
-      // Trigger dataset ID detection immediately so the MCP is ready to use
-      void simplifiClient.getDatasetId().catch(() => {});
-
-      res.status(200).type("html").send(connectPage({ success: true }));
+      result = await simplifiAuthService.attemptLoginWithCredentials(email, password);
     } catch (error) {
       logWarn("Simplifi connect login failed", { error: error instanceof Error ? error.message : String(error) });
       res.status(200).type("html").send(connectPage({ error: "Login failed. Check your email and password." }));
+      return;
+    }
+
+    if (result.status === "mfa_required") {
+      res.status(200).type("html").send(
+        connectPage({ mfa: { pendingId: result.pendingId, channel: result.mfaChannel, hint: result.email } }),
+      );
+      return;
+    }
+
+    try {
+      await simplifiClient.getDatasetId();
+      await initializeSync();
+      res.status(200).type("html").send(connectPage({ success: true }));
+    } catch (error) {
+      logWarn("Simplifi initial sync after login failed", { error: error instanceof Error ? error.message : String(error) });
+      res.status(200).type("html").send(
+        connectPage({ error: "Account connected, but initial data sync failed. Retry connecting to finish setup." }),
+      );
     }
   });
 
   app.post("/connect/mfa", async (req, res) => {
+    if (!isValidConnectNonce(req.body.connect_nonce)) {
+      res.status(403).type("html").send(connectPage({ error: "Invalid or expired connection request. Reload this page." }));
+      return;
+    }
+
     const pendingId = typeof req.body.pending_id === "string" ? req.body.pending_id : "";
     const mfaCode = typeof req.body.mfa_code === "string" ? req.body.mfa_code.trim() : "";
 
@@ -308,11 +352,21 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
 
     try {
       await simplifiAuthService.completeMfaLogin(pendingId, mfaCode);
-      void simplifiClient.getDatasetId().catch(() => {});
-      res.status(200).type("html").send(connectPage({ success: true }));
     } catch (error) {
       res.status(200).type("html").send(
         connectPage({ mfa: { pendingId, channel: mfaInfo.mfaChannel, hint: mfaInfo.email }, error: "Incorrect code. Try again." }),
+      );
+      return;
+    }
+
+    try {
+      await simplifiClient.getDatasetId();
+      await initializeSync();
+      res.status(200).type("html").send(connectPage({ success: true }));
+    } catch (error) {
+      logWarn("Simplifi initial sync after MFA failed", { error: error instanceof Error ? error.message : String(error) });
+      res.status(200).type("html").send(
+        connectPage({ error: "Account connected, but initial data sync failed. Retry connecting to finish setup." }),
       );
     }
   });

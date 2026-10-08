@@ -258,11 +258,18 @@ export class TransactionToolService {
 
     let resolvedTagId = input.tagId;
     if (!resolvedTagId && input.tagName) {
-      const match = this.db.listTags({ search: input.tagName, limit: 1 })[0];
-      if (!match?.id) {
+      const requestedName = input.tagName.trim().toLowerCase();
+      const matches = this.db.listTags({}).filter((tag) => tag.name?.trim().toLowerCase() === requestedName);
+      if (matches.length === 0) {
         throw new Error(`Tag not found: ${input.tagName}`);
       }
-      resolvedTagId = match.id;
+      if (matches.length > 1) {
+        throw new Error(`Multiple tags match the name: ${input.tagName}`);
+      }
+      if (!matches[0]!.id) {
+        throw new Error(`Tag not found: ${input.tagName}`);
+      }
+      resolvedTagId = matches[0]!.id;
     }
 
     if (!resolvedTagId) {

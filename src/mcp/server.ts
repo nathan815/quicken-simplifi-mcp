@@ -144,7 +144,7 @@ export function createMcpServer(
     "create_tag",
     "Create a new tag in Simplifi and add it to the local cache.",
     {
-      name: z.string().min(1),
+      name: z.string().trim().min(1),
     },
     (input) => toolService.createTag(input),
   );
@@ -195,7 +195,7 @@ export function createMcpServer(
     "Replace all tags on a transaction with exactly the provided tag IDs (overwrites existing tags).",
     {
       transactionId: z.string().min(1),
-      tagIds: z.array(z.string()),
+      tagIds: z.array(z.string().trim().min(1)),
     },
     (input) => toolService.setTransactionTags(input),
   );

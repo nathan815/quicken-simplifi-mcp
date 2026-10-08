@@ -6,7 +6,14 @@ This fork of [krconv/quicken-simplifi-mcp](https://github.com/krconv/quicken-sim
 
 ## 1. New MCP Tools
 
-The upstream server had no way to modify tags or memos on transactions — you could list tags but not apply them. Five new tools fill that gap.
+The upstream server had no way to create or modify tags or memos on transactions — you could list tags but not apply them. Six new tools fill that gap.
+
+### `create_tag`
+Create a new tag in Simplifi.
+
+```json
+{ "name": "Vacation" }
+```
 
 ### `tag_transaction`
 Add one or more tags to a transaction without disturbing any existing tags.
@@ -132,7 +139,7 @@ yarn setup
 
 Generates a random `MCP_API_KEY`, writes it to `.env`, and prints the exact `claude mcp add` command. No manual `.env` editing required for a first-time setup.
 
-After running `yarn setup`, the only remaining step is `yarn start` — which auto-opens the browser for the Quicken connect flow.
+After running `yarn setup`, build and start the server with `yarn build && yarn start` — it auto-opens the browser for the Quicken connect flow.
 
 ---
 
@@ -157,8 +164,8 @@ Everything else is auto-detected or handled interactively.
 | `src/db/database.ts` | Added `simplifi_config` table; `getDatasetId`/`saveDatasetId`; `listTransactionsByTag` |
 | `src/simplifi/client.ts` | Dynamic dataset ID resolution; `listDatasets()`; `authedRequestNoDataset()` |
 | `src/simplifi/auth-service.ts` | `attemptLoginWithCredentials()`; `onNeedsReauth()` callback; debounced reauth; optional config credentials |
-| `src/services/transaction-tool-service.ts` | `tagTransaction`, `untagTransaction`, `setTransactionTags`, `setTransactionMemo`, `listTransactionsByTag` |
-| `src/mcp/server.ts` | 5 new tool registrations |
+| `src/services/transaction-tool-service.ts` | `createTag`, `tagTransaction`, `untagTransaction`, `setTransactionTags`, `setTransactionMemo`, `listTransactionsByTag` |
+| `src/mcp/server.ts` | 6 new tool registrations |
 | `src/http/server.ts` | `/connect` and `/connect/mfa` routes; static API key middleware |
 | `src/index.ts` | `openConnectPage()`; auto-open on first run; `onNeedsReauth` registration |
 | `src/setup.ts` | New file — setup wizard |

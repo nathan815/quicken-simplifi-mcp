@@ -47,7 +47,8 @@ async function main(): Promise<void> {
     simplifiAuthService,
     simplifiClient,
     toolService,
-    hasSimplifiTokens: () => db.getSimplifiTokens() !== null,
+    isReady: () => db.getSimplifiTokens() !== null && Boolean(db.getSyncState().lastFullSyncAt),
+    initializeSync: () => syncService.ensureInitialized(),
     notifyActivity: () => syncService.notifyActivity(),
   });
 

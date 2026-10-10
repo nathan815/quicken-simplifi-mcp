@@ -346,10 +346,35 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
 
   // ───────────────────────────────────────────────────────────────────────────
 
+  // RFC 9728 protected-resource metadata: tells MCP clients which authorization server guards /mcp.
+  // Served at the root and at the path-suffixed location for the /mcp resource.
+  const protectedResourceMetadata = (req: Request, res: Response): void => {
+    const base = baseUrl(req);
+    res.status(200).json({
+      resource: `${base}/mcp`,
+      authorization_servers: [base],
+      bearer_methods_supported: ["header"],
+      scopes_supported: ["mcp:read", "mcp:write"],
+    });
+  };
+  app.get("/.well-known/oauth-protected-resource", protectedResourceMetadata);
+  app.get("/.well-known/oauth-protected-resource/mcp", protectedResourceMetadata);
+
+  // RFC 6750 / RFC 9728: point unauthenticated clients at the metadata so they can start the OAuth flow.
+  const unauthorized = (req: Request, res: Response, description: string, hadToken: boolean): void => {
+    const metadataUrl = `${baseUrl(req)}/.well-known/oauth-protected-resource`;
+    const params = [`resource_metadata="${metadataUrl}"`];
+    if (hadToken) {
+      params.unshift('error="invalid_token"', `error_description="${description.replace(/"/g, "'")}"`);
+    }
+    res.set("WWW-Authenticate", `Bearer ${params.join(", ")}`);
+    res.status(401).json({ error: "invalid_token", error_description: description });
+  };
+
   const requireAccessToken = (req: Request, res: Response, next: NextFunction): void => {
     const token = readBearerToken(req);
     if (!token) {
-      res.status(401).json({ error: "invalid_token", error_description: "Missing bearer token" });
+      unauthorized(req, res, "Missing bearer token", false);
       return;
     }
 
@@ -368,10 +393,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
       oauthService.verifyAccessToken(token);
       next();
     } catch (error) {
-      res.status(401).json({
-        error: "invalid_token",
-        error_description: error instanceof Error ? error.message : "Token verification failed",
-      });
+      unauthorized(req, res, error instanceof Error ? error.message : "Token verification failed", true);
     }
   };
 

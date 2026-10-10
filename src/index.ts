@@ -1,8 +1,7 @@
-import { exec } from "node:child_process";
 import { loadConfig } from "./config.js";
 import { DatabaseContext } from "./db/database.js";
 import { startHttpServer } from "./http/server.js";
-import { logError, logInfo, logWarn } from "./logger.js";
+import { logError, logInfo } from "./logger.js";
 import { OAuthService } from "./oauth/oauth-service.js";
 import { TransactionToolService } from "./services/transaction-tool-service.js";
 import { ReferenceDataService } from "./services/reference-data-service.js";
@@ -51,24 +50,6 @@ async function main(): Promise<void> {
     initializeSync: () => syncService.ensureInitialized(),
     notifyActivity: () => syncService.notifyActivity(),
   });
-
-  function openConnectPage(): void {
-    const connectUrl = `${config.server.publicBaseUrl}/connect`;
-    logInfo("Opening browser to Simplifi connect page", { url: connectUrl });
-    console.log(`\n🔗  Open this URL to connect your Simplifi account:\n    ${connectUrl}\n`);
-    const openCmd = process.platform === "darwin" ? "open" : process.platform === "win32" ? "start" : "xdg-open";
-    exec(`${openCmd} "${connectUrl}"`, (err) => {
-      if (err) logWarn("Could not open browser automatically", { error: err.message });
-    });
-  }
-
-  // Open browser whenever the session expires and needs reconnecting.
-  simplifiAuthService.onNeedsReauth(openConnectPage);
-
-  // Also open immediately on first run (no tokens yet).
-  if (!db.getSimplifiTokens()) {
-    openConnectPage();
-  }
 
   const shutdown = async (signal: string): Promise<void> => {
     logInfo("Shutting down", { signal });

@@ -115,10 +115,6 @@ export class OAuthService {
     };
   }
 
-  public validateLogin(username: string, password: string): boolean {
-    return username === this.config.loginUsername && password === this.config.loginPassword;
-  }
-
   public issueAuthorizationCode(request: AuthorizeRequest): string {
     const code = randomToken(32);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
@@ -147,13 +143,8 @@ export class OAuthService {
     return redirect.toString();
   }
 
-  public buildMfaPage(
-    request: AuthorizeRequest,
-    pendingId: string,
-    mfaInfo: { mfaChannel: string; email?: string; phone?: string },
-    errorMessage?: string,
-  ): string {
-    const hidden = {
+  private authorizeHiddenFields(request: AuthorizeRequest): Record<string, string | undefined> {
+    return {
       response_type: request.responseType,
       client_id: request.clientId,
       redirect_uri: request.redirectUri,
@@ -161,21 +152,58 @@ export class OAuthService {
       scope: request.scope,
       code_challenge: request.codeChallenge,
       code_challenge_method: request.codeChallengeMethod,
-      pending_mfa_id: pendingId,
     };
+  }
 
-    const hiddenInputs = Object.entries(hidden)
+  public buildMfaPage(
+    request: AuthorizeRequest,
+    pendingId: string,
+    mfaInfo: { mfaChannel: string; email?: string; phone?: string },
+    errorMessage?: string,
+  ): string {
+    return this.renderMfaPage({
+      action: "/oauth/mfa",
+      hidden: { ...this.authorizeHiddenFields(request), pending_mfa_id: pendingId },
+      mfaInfo,
+      errorMessage,
+    });
+  }
+
+  public buildAuthorizePage(request: AuthorizeRequest, errorMessage?: string): string {
+    return this.renderLoginPage({
+      action: "/oauth/authorize",
+      hidden: this.authorizeHiddenFields(request),
+      subtitle: "Enter your Quicken Simplifi credentials to authorize MCP access.",
+      errorMessage,
+    });
+  }
+
+  private renderHiddenInputs(hidden: Record<string, string | undefined>): string {
+    return Object.entries(hidden)
       .filter(([, value]) => value !== undefined)
       .map(
         ([key, value]) =>
           `<input type="hidden" name="${this.escapeHtml(key)}" value="${this.escapeHtml(String(value))}" />`,
       )
       .join("\n");
+  }
 
-    const contact = mfaInfo.email
-      ? `email (${this.escapeHtml(mfaInfo.email)})`
-      : mfaInfo.phone
+  private renderMfaPage(opts: {
+    action: string;
+    hidden: Record<string, string | undefined>;
+    mfaInfo: { mfaChannel: string; email?: string; phone?: string };
+    errorMessage?: string;
+  }): string {
+    const { mfaInfo, errorMessage } = opts;
+    const hiddenInputs = this.renderHiddenInputs(opts.hidden);
+
+    const isPhoneChannel = /^(sms|text|phone)/i.test(mfaInfo.mfaChannel);
+    const contact = isPhoneChannel
+      ? mfaInfo.phone
         ? `phone (${this.escapeHtml(mfaInfo.phone)})`
+        : "phone"
+      : mfaInfo.email
+        ? `email (${this.escapeHtml(mfaInfo.email)})`
         : this.escapeHtml(mfaInfo.mfaChannel);
 
     const errorSection = errorMessage
@@ -194,7 +222,7 @@ export class OAuthService {
       <h1 style="margin:0 0 8px 0;font-size:20px;">Two-Factor Verification</h1>
       <p style="margin:0 0 16px 0;color:#475569;font-size:14px;">A verification code was sent to your ${contact}. Enter it below to continue.</p>
       ${errorSection}
-      <form method="POST" action="/oauth/mfa">
+      <form method="POST" action="${this.escapeHtml(opts.action)}">
         ${hiddenInputs}
         <label style="display:block;margin:0 0 8px 0;font-size:13px;color:#334155;">Verification Code</label>
         <input type="text" name="mfa_code" inputmode="numeric" autocomplete="one-time-code" required autofocus
@@ -206,48 +234,45 @@ export class OAuthService {
 </html>`;
   }
 
-  public buildAuthorizePage(request: AuthorizeRequest, errorMessage?: string): string {
-    const hidden = {
-      response_type: request.responseType,
-      client_id: request.clientId,
-      redirect_uri: request.redirectUri,
-      state: request.state,
-      scope: request.scope,
-      code_challenge: request.codeChallenge,
-      code_challenge_method: request.codeChallengeMethod,
-    };
-
-    const hiddenInputs = Object.entries(hidden)
-      .filter(([, value]) => value !== undefined)
-      .map(
-        ([key, value]) =>
-          `<input type="hidden" name="${this.escapeHtml(key)}" value="${this.escapeHtml(String(value))}" />`,
-      )
-      .join("\n");
-
-    const errorSection = errorMessage
-      ? `<p style="color:#b91c1c;font-size:14px;">${this.escapeHtml(errorMessage)}</p>`
+  private renderLoginPage(opts: {
+    action: string;
+    hidden: Record<string, string | undefined>;
+    subtitle: string;
+    errorMessage?: string;
+  }): string {
+    const hiddenInputs = this.renderHiddenInputs(opts.hidden);
+    const errorSection = opts.errorMessage
+      ? `<p style="color:#b91c1c;font-size:14px;">${this.escapeHtml(opts.errorMessage)}</p>`
       : "";
 
     return `<!doctype html>
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>Simplifi MCP Login</title>
+    <title>Simplifi MCP — Sign In</title>
     <meta name="viewport" content="width=device-width,initial-scale=1" />
   </head>
-  <body style="font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;background:#f8fafc;margin:0;padding:32px;">
-    <main style="max-width:420px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;">
-      <h1 style="margin:0 0 8px 0;font-size:20px;">Authorize MCP Access</h1>
-      <p style="margin:0 0 16px 0;color:#475569;font-size:14px;">Sign in to authorize this client to use your Simplifi MCP server.</p>
+  <body style="font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;background:#f0fdf4;margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;padding:32px;box-sizing:border-box;">
+    <main style="max-width:400px;width:100%;background:#ffffff;border:1px solid #bbf7d0;border-radius:16px;padding:32px;box-shadow:0 4px 24px rgba(0,0,0,.06);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:24px;">
+        <div style="width:36px;height:36px;background:#15803d;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;">S</div>
+        <span style="font-weight:700;font-size:18px;color:#14532d;">Simplifi MCP</span>
+      </div>
+      <h1 style="margin:0 0 4px 0;font-size:20px;font-weight:700;color:#14532d;">Sign in to Simplifi</h1>
+      <p style="margin:0 0 20px 0;color:#4b5563;font-size:14px;">${this.escapeHtml(opts.subtitle)}</p>
+      <div style="background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:20px;">
+        🔒 Your credentials are sent directly to Quicken and are never stored on disk.
+      </div>
       ${errorSection}
-      <form method="POST" action="/oauth/authorize">
+      <form method="POST" action="${this.escapeHtml(opts.action)}">
         ${hiddenInputs}
-        <label style="display:block;margin:0 0 8px 0;font-size:13px;color:#334155;">Username</label>
-        <input type="text" name="username" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:12px;" />
-        <label style="display:block;margin:0 0 8px 0;font-size:13px;color:#334155;">Password</label>
-        <input type="password" name="password" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:16px;" />
-        <button type="submit" style="width:100%;padding:10px 12px;border:0;border-radius:8px;background:#0f766e;color:white;font-weight:600;cursor:pointer;">Authorize</button>
+        <label style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px;">Email</label>
+        <input type="email" name="email" autocomplete="email" required autofocus
+          style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #d1fae5;border-radius:8px;margin-bottom:16px;font-size:15px;" />
+        <label style="display:block;font-size:13px;font-weight:500;color:#374151;margin-bottom:6px;">Password</label>
+        <input type="password" name="password" autocomplete="current-password" required
+          style="width:100%;box-sizing:border-box;padding:10px 12px;border:1.5px solid #d1fae5;border-radius:8px;margin-bottom:20px;font-size:15px;" />
+        <button type="submit" style="width:100%;padding:11px;border:0;border-radius:8px;background:#16a34a;color:white;font-size:15px;font-weight:600;cursor:pointer;">Sign in</button>
       </form>
     </main>
   </body>
@@ -339,7 +364,7 @@ export class OAuthService {
 
   private issueTokenPair(params: { clientId: string; scope?: string }): TokenResponse {
     const accessPayload: AccessTokenClaims = {
-      sub: this.config.loginUsername,
+      sub: "quicken-user",
       client_id: params.clientId,
       scope: params.scope,
     };
@@ -352,7 +377,11 @@ export class OAuthService {
     });
 
     const refreshToken = randomToken(48);
-    const refreshExpiresAt = new Date(Date.now() + this.config.refreshTokenTtlSeconds * 1000).toISOString();
+    // Tie OAuth refresh token lifetime to Quicken session — when Quicken expires, so does this.
+    const simplifiTokens = this.db.getSimplifiTokens();
+    const refreshExpiresAt =
+      simplifiTokens?.refreshTokenExpiresAt ??
+      new Date(Date.now() + this.config.refreshTokenTtlSeconds * 1000).toISOString();
 
     this.db.saveRefreshToken({
       token: refreshToken,

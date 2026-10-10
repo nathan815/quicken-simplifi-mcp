@@ -741,6 +741,12 @@ export class DatabaseContext {
       .run(nowIso(), sha256Base64Url(token));
   }
 
+  public revokeAllOAuthRefreshTokens(): void {
+    this.db
+      .prepare(`UPDATE oauth_refresh_tokens SET revoked_at = ? WHERE revoked_at IS NULL`)
+      .run(nowIso());
+  }
+
   public getReferenceSyncState(): ReferenceSyncState {
     const row = this.db
       .prepare(

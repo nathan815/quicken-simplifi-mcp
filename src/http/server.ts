@@ -119,15 +119,15 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
   app.post("/oauth/authorize", async (req, res) => {
     try {
       const request = oauthService.parseAuthorizeRequest(toRecord(req.body));
-      const username = typeof req.body.username === "string" ? req.body.username : "";
+      const email = typeof req.body.email === "string" ? req.body.email.trim() : "";
       const password = typeof req.body.password === "string" ? req.body.password : "";
 
-      if (!oauthService.validateLogin(username, password)) {
-        res.status(401).type("html").send(oauthService.buildAuthorizePage(request, "Invalid credentials"));
+      if (!email || !password) {
+        res.status(400).type("html").send(oauthService.buildAuthorizePage(request, "Email and password are required."));
         return;
       }
 
-      const result = await simplifiAuthService.attemptLogin();
+      const result = await simplifiAuthService.attemptLoginWithCredentials(email, password);
 
       if (result.status === "mfa_required") {
         res
@@ -137,10 +137,12 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
         return;
       }
 
+      void simplifiClient.getDatasetId().catch(() => {});
       const code = oauthService.issueAuthorizationCode(request);
       const redirect = oauthService.buildAuthorizeRedirect(request, code);
       res.redirect(302, redirect);
     } catch (error) {
+      logWarn("OAuth authorize failed", { error: error instanceof Error ? error.message : String(error) });
       res.status(400).type("text/plain").send(error instanceof Error ? error.message : "Invalid authorize request");
     }
   });
@@ -176,6 +178,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
         return;
       }
 
+      void simplifiClient.getDatasetId().catch(() => {});
       const code = oauthService.issueAuthorizationCode(request);
       const redirect = oauthService.buildAuthorizeRedirect(request, code);
       res.redirect(302, redirect);
@@ -299,6 +302,15 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     },
   });
 
+  // /connect only exists when MCP_API_KEY is set; otherwise OAuth is the only way in.
+  app.use("/connect", (_req, res, next) => {
+    if (!config.oauth.staticApiKey) {
+      res.status(404).type("text/plain").send("Not found");
+      return;
+    }
+    next();
+  });
+
   app.get("/connect", (_req, res) => {
     if (isReady()) {
       res.status(200).type("html").send(connectPage({ success: true }));
@@ -389,14 +401,15 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
       return;
     }
 
-    // Static API key mode: skip full OAuth JWT validation
-    if (config.oauth.staticApiKey) {
-      if (token === config.oauth.staticApiKey) {
+    // Optional static API key (constant-time compare); otherwise fall through to OAuth JWT validation.
+    const staticKey = config.oauth.staticApiKey;
+    if (staticKey) {
+      const submitted = Buffer.from(token);
+      const expected = Buffer.from(staticKey);
+      if (submitted.length === expected.length && timingSafeEqual(submitted, expected)) {
         next();
         return;
       }
-      res.status(401).json({ error: "invalid_token", error_description: "Invalid API key" });
-      return;
     }
 
     try {

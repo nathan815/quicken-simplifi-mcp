@@ -71,11 +71,12 @@ export class SimplifiAuthService {
 
     if (cached) this.db.deleteSimplifiTokens();
 
-    // No credentials configured — browser connect flow is required.
+    // No .env credentials to fall back on — revoke OAuth tokens so Claude.ai triggers re-auth.
     if (!this.config.email || !this.config.password) {
+      this.db.revokeAllOAuthRefreshTokens();
       this.triggerReauth();
       throw new Error(
-        "Simplifi session expired. Please reconnect at http://localhost:8787/connect",
+        "Quicken session expired. Please re-authenticate via OAuth.",
       );
     }
 
@@ -128,76 +129,6 @@ export class SimplifiAuthService {
     const token = await this.processSuccessfulAuthorize(authorizeResponse);
     this.db.saveSimplifiTokens(token);
     logInfo("Simplifi browser connect login completed");
-    return { status: "ok" };
-  }
-
-  /**
-   * Attempts to ensure valid Simplifi tokens exist. Used by the OAuth authorization
-   * flow so that MFA can be handled interactively in the browser before the MCP
-   * client receives its authorization code.
-   *
-   * Returns { status: "ok" } if tokens are already valid or login succeeded without MFA.
-   * Returns { status: "mfa_required", ... } if Simplifi sent a 202 MFA challenge.
-   */
-  public async attemptLogin(): Promise<AttemptLoginResult> {
-    const cached = this.db.getSimplifiTokens();
-
-    if (cached && !isExpired(cached.accessTokenExpiresAt, AUTHORIZATION_SKEW_MS)) {
-      return { status: "ok" };
-    }
-
-    if (cached?.refreshToken) {
-      try {
-        const refreshed = await this.refreshToken(cached.refreshToken);
-        this.db.saveSimplifiTokens(refreshed);
-        return { status: "ok" };
-      } catch (error) {
-        logWarn("Simplifi token refresh failed during OAuth flow; attempting credential re-login", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-        this.db.deleteSimplifiTokens();
-      }
-    }
-
-    if (cached) this.db.deleteSimplifiTokens();
-
-    const threatMetrixSessionId = this.config.threatMetrixSessionId ?? randomUUID();
-    const threatMetrixRequestId = this.config.threatMetrixRequestId ?? null;
-
-    const authorizeResponse = await this.callAuthorize({
-      mfaChannel: null,
-      mfaCode: null,
-      mfaId: null,
-      threatMetrixSessionId,
-      threatMetrixRequestId,
-    });
-
-    if (authorizeResponse.status === 202) {
-      const body = (await authorizeResponse.json()) as Record<string, unknown>;
-      const mfaId = String(body.mfaId ?? "");
-      const mfaChannel = typeof body.mfaChannel === "string" ? body.mfaChannel : "EMAIL";
-      const email = typeof body.email === "string" ? body.email : undefined;
-      const phone = typeof body.phone === "string" ? body.phone : undefined;
-
-      const pendingId = randomUUID();
-      const pending: PendingMfa = {
-        mfaId,
-        mfaChannel,
-        email,
-        phone,
-        threatMetrixSessionId,
-        expiresAt: Date.now() + 10 * 60 * 1000,
-        expiryTimer: setTimeout(() => this.deletePendingMfa(pendingId), 10 * 60 * 1000),
-      };
-      pending.expiryTimer.unref();
-      this.pendingMfaMap.set(pendingId, pending);
-
-      return { status: "mfa_required", pendingId, mfaChannel, email, phone };
-    }
-
-    const token = await this.processSuccessfulAuthorize(authorizeResponse);
-    this.db.saveSimplifiTokens(token);
-    logInfo("Simplifi credential login completed");
     return { status: "ok" };
   }
 

@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import dotenv from "dotenv";
 
@@ -19,8 +20,6 @@ export interface AppConfig {
     jwtSecret: string;
     accessTokenTtlSeconds: number;
     refreshTokenTtlSeconds: number;
-    loginUsername: string;
-    loginPassword: string;
     allowedRedirectUris: string[];
     staticApiKey?: string;
   };
@@ -102,16 +101,10 @@ export function loadConfig(): AppConfig {
       issuer: process.env.OAUTH_ISSUER ?? publicBaseUrl,
       audience: process.env.OAUTH_AUDIENCE ?? "simplifi-mcp",
       jwtSecret: staticApiKey
-        ? getOptionalEnv("OAUTH_JWT_SECRET") ?? "unused-when-static-api-key-is-set"
+        ? getOptionalEnv("OAUTH_JWT_SECRET") ?? randomBytes(32).toString("hex") // never a guessable default
         : getEnv("OAUTH_JWT_SECRET"),
       accessTokenTtlSeconds: getNumberEnv("OAUTH_ACCESS_TOKEN_TTL_SECONDS", 900),
       refreshTokenTtlSeconds: getNumberEnv("OAUTH_REFRESH_TOKEN_TTL_SECONDS", 60 * 60 * 24 * 30),
-      loginUsername: staticApiKey
-        ? getOptionalEnv("OAUTH_LOGIN_USERNAME") ?? "admin"
-        : getEnv("OAUTH_LOGIN_USERNAME"),
-      loginPassword: staticApiKey
-        ? getOptionalEnv("OAUTH_LOGIN_PASSWORD") ?? ""
-        : getEnv("OAUTH_LOGIN_PASSWORD"),
       allowedRedirectUris: parseRedirectAllowlist(process.env.OAUTH_ALLOWED_REDIRECT_URIS ?? ""),
       staticApiKey,
     },

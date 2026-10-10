@@ -90,17 +90,17 @@ export function loginPage(opts: {
     "Simplifi MCP — Sign In",
     `<h1>Sign in to Simplifi</h1>
       <p class="sub">${escapeHtml(opts.subtitle)}</p>
-      <div class="notice">🔒 Your credentials are sent directly to Quicken and are never stored on disk.</div>
+      <div class="notice">🔒 Your credentials are sent to this server, which passes them to Quicken to sign you in. They are never stored on disk.</div>
       ${errorBox(opts.errorMessage)}
       <form method="POST" action="${escapeHtml(opts.action)}">
         ${hiddenInputs(opts.hidden ?? {})}
         <div class="field">
-          <label>Email</label>
-          <input type="email" name="email" autocomplete="email" autofocus required placeholder="you@example.com" />
+          <label for="email">Email</label>
+          <input type="email" id="email" name="email" autocomplete="email" autofocus required placeholder="you@example.com" />
         </div>
         <div class="field">
-          <label>Password</label>
-          <input type="password" name="password" autocomplete="current-password" required />
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" autocomplete="current-password" required />
         </div>
         <button type="submit">Sign in</button>
       </form>`,
@@ -121,8 +121,8 @@ export function mfaPage(opts: {
       <form method="POST" action="${escapeHtml(opts.action)}">
         ${hiddenInputs(opts.hidden ?? {})}
         <div class="field">
-          <label>Verification code</label>
-          <input type="text" class="code" name="mfa_code" inputmode="numeric" autocomplete="one-time-code" autofocus required placeholder="123456" />
+          <label for="mfa_code">Verification code</label>
+          <input type="text" class="code" id="mfa_code" name="mfa_code" inputmode="numeric" autocomplete="one-time-code" autofocus required placeholder="123456" />
         </div>
         <button type="submit">Verify</button>
       </form>`,

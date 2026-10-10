@@ -295,6 +295,39 @@ export class DatabaseContext {
     return row?.value ?? null;
   }
 
+  public getAccountFingerprint(): string | null {
+    const row = this.db.prepare(`SELECT value FROM simplifi_config WHERE key = 'account_fingerprint'`).get() as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  public saveAccountFingerprint(fingerprint: string): void {
+    this.db.prepare(`INSERT INTO simplifi_config (key, value) VALUES ('account_fingerprint', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(fingerprint);
+  }
+
+  public hasCachedData(): boolean {
+    return this.db.prepare(`SELECT 1 FROM transactions LIMIT 1`).get() !== undefined;
+  }
+
+  /**
+   * Drop everything cached from a Simplifi account (data, sync cursors, dataset id) so it can be
+   * re-synced. Keeps Simplifi tokens and OAuth state.
+   */
+  public resetAccountData(): void {
+    const run = this.db.transaction(() => {
+      this.db.exec(`
+        DELETE FROM transactions;
+        DELETE FROM categories;
+        DELETE FROM tags;
+        DELETE FROM simplifi_config WHERE key = 'dataset_id';
+        UPDATE sync_state SET date_on_after = NULL, last_as_of = NULL, last_full_sync_at = NULL,
+          last_sync_at = NULL, sync_status = NULL, last_error = NULL WHERE id = 1;
+        UPDATE reference_sync_state SET categories_last_as_of = NULL, categories_last_sync_at = NULL,
+          tags_last_as_of = NULL, tags_last_sync_at = NULL, last_error = NULL WHERE id = 1;
+      `);
+    });
+    run();
+  }
+
   public clearDatasetId(): void {
     this.db.prepare(`DELETE FROM simplifi_config WHERE key = 'dataset_id'`).run();
   }

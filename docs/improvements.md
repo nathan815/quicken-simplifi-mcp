@@ -78,7 +78,7 @@ claude mcp add simplifi --transport http http://localhost:8787/mcp \
 
 ### What becomes optional
 
-When `MCP_API_KEY` is set, `OAUTH_JWT_SECRET` is optional (a random per-process secret is used if it is unset, so OAuth tokens do not survive a restart). `OAUTH_LOGIN_USERNAME` / `OAUTH_LOGIN_PASSWORD` no longer exist: the OAuth authorize page signs in with your Quicken email and password (see `docs/plan-unified-oauth.md`).
+When `MCP_API_KEY` is set, `OAUTH_JWT_SECRET` is optional (a random per-process secret is used if it is unset, so access tokens issued before a restart stop validating; clients then refresh using the refresh tokens persisted in SQLite and get new ones, so set a fixed secret if you want that to be seamless). `OAUTH_LOGIN_USERNAME` / `OAUTH_LOGIN_PASSWORD` no longer exist: the OAuth authorize page signs in with your Quicken email and password (see `docs/plan-unified-oauth.md`).
 
 Clients that cannot run OAuth (e.g. an agent reaching the server over a private network) use the key. For Claude.ai web, which only supports OAuth, use the OAuth flow. Keep `HOST` bound to a private interface when the key is set.
 
@@ -114,7 +114,7 @@ A `/connect` route that handles the Quicken auth flow in the browser. It is only
 
 1. Open `http://localhost:8787/connect` yourself (the server no longer opens a browser)
 2. User sees a Simplifi-branded login form (CSRF nonce, rate limited to 5 attempts per 15 minutes)
-3. Credentials go directly from the browser form to Quicken's API (`POST /oauth/authorize`)
+3. The browser posts your credentials to this server, which forwards them to Quicken's API; they are held in memory only (for the duration of an MFA step) and never written to disk
 4. If MFA is required, a verification code page is shown mid-flow
 5. On success, only the OAuth **tokens** are stored in SQLite — credentials are never written anywhere
 6. On dataset ID discovery, the ID is stored in SQLite too

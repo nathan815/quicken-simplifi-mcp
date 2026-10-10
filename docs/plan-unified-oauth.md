@@ -40,7 +40,7 @@ Dataset ID auto-detected and stored
         ↓
 Server issues OAuth auth code → redirect to Claude.ai
         ↓
-Claude.ai exchanges code for JWT (TTL tied to Quicken refresh token lifetime)
+Claude.ai exchanges code for tokens (the OAuth refresh token's expiry is tied to the Quicken refresh token; the JWT access token stays short-lived)
         ↓
 MCP connected. Both auth layers satisfied in one browser session.
 ```
@@ -98,18 +98,18 @@ if (result.status === 'mfa_required') {
 // issue auth code
 ```
 
-### 3. Tie OAuth JWT TTL to Quicken refresh token lifetime
+### 3. Tie the OAuth refresh token lifetime to the Quicken refresh token
 
-After a successful Quicken login, the response includes `refreshTokenExpired` (an ISO timestamp). Use that to set the OAuth JWT expiry.
+After a successful Quicken login, the response includes `refreshTokenExpired` (an ISO timestamp). Use that as the expiry of the OAuth refresh token. The JWT access token keeps its short TTL (`OAUTH_ACCESS_TOKEN_TTL_SECONDS`) and is renewed with the refresh token.
 
 **File:** `src/oauth/oauth-service.ts` — `issueTokenPair()`
 
 ```typescript
-// Pass Quicken refresh token expiry through to JWT signing
-jwt.sign(payload, secret, { expiresIn: quickenRefreshExpiresIn })
+// OAuth refresh token expires with the Quicken refresh token; the JWT access token stays short-lived
+const refreshExpiresAt = simplifiTokens?.refreshTokenExpiresAt ?? fallbackFromConfig;
 ```
 
-This means the OAuth JWT naturally expires when the Quicken session would expire — no manual coordination needed.
+This means the OAuth session naturally ends when the Quicken session would expire — no manual coordination needed.
 
 ### 4. Revoke OAuth tokens when Quicken refresh fails
 

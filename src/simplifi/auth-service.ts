@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config.js";
 import { logInfo, logWarn } from "../logger.js";
 import type { SimplifiTokenSet } from "../types.js";
-import { isExpired, nowIso } from "../utils.js";
+import { isExpired, nowIso, sha256Base64Url } from "../utils.js";
 import { DatabaseContext } from "../db/database.js";
 
 const AUTHORIZATION_SKEW_MS = 60_000;
@@ -28,26 +28,12 @@ export type AttemptLoginResult =
 
 export class SimplifiAuthService {
   private readonly pendingMfaMap = new Map<string, PendingMfa>();
-  private reauthCallback?: () => void;
-  private reauthDebounceTimer?: ReturnType<typeof setTimeout>;
 
   public constructor(
     private readonly config: AppConfig["simplifi"],
     private readonly db: DatabaseContext,
   ) {}
 
-  /** Register a callback that fires (at most once per 10s) when the server needs the user to reconnect. */
-  public onNeedsReauth(callback: () => void): void {
-    this.reauthCallback = callback;
-  }
-
-  private triggerReauth(): void {
-    if (this.reauthDebounceTimer) return;
-    this.reauthCallback?.();
-    this.reauthDebounceTimer = setTimeout(() => {
-      this.reauthDebounceTimer = undefined;
-    }, 10_000);
-  }
 
   public async getAccessToken(): Promise<string> {
     const cached = this.db.getSimplifiTokens();
@@ -74,7 +60,6 @@ export class SimplifiAuthService {
     // No .env credentials to fall back on — revoke OAuth tokens so Claude.ai triggers re-auth.
     if (!this.config.email || !this.config.password) {
       this.db.revokeAllOAuthRefreshTokens();
-      this.triggerReauth();
       throw new Error(
         "Quicken session expired. Please re-authenticate via OAuth.",
       );
@@ -82,6 +67,7 @@ export class SimplifiAuthService {
 
     const created = await this.loginWithCredentials();
     this.db.saveSimplifiTokens(created);
+    this.bindAccount(this.config.email);
     return created.accessToken;
   }
 
@@ -140,8 +126,7 @@ export class SimplifiAuthService {
 
     const token = await this.processSuccessfulAuthorize(authorizeResponse);
     this.db.saveSimplifiTokens(token);
-    // A fresh login may be a different account; re-detect its dataset instead of reusing the old one.
-    this.db.clearDatasetId();
+    this.bindAccount(loginEmail);
     logInfo("Simplifi browser connect login completed");
     return { status: "ok" };
   }
@@ -178,9 +163,31 @@ export class SimplifiAuthService {
 
     const token = await this.processSuccessfulAuthorize(authorizeResponse);
     this.db.saveSimplifiTokens(token);
-    this.db.clearDatasetId();
+    this.bindAccount(pending.loginEmail);
     this.deletePendingMfa(pendingId);
     logInfo("Simplifi MFA login completed");
+  }
+
+  /**
+   * Tie the local cache to the account that is logged in. If a different account (or an unknown one,
+   * for a cache that predates this check) signs in, drop the cached data so it is never served to,
+   * or mixed with, the new account. The dataset id is always re-detected after a fresh login.
+   */
+  private bindAccount(email: string | undefined): void {
+    if (!email) {
+      return;
+    }
+
+    const fingerprint = sha256Base64Url(email.trim().toLowerCase());
+    const stored = this.db.getAccountFingerprint();
+
+    if (stored !== fingerprint && (stored !== null || this.db.hasCachedData())) {
+      logWarn("Different Simplifi account detected; clearing locally cached data");
+      this.db.resetAccountData();
+    }
+
+    this.db.saveAccountFingerprint(fingerprint);
+    this.db.clearDatasetId();
   }
 
   public getPendingMfaInfo(pendingId: string): Pick<PendingMfa, "mfaChannel" | "email" | "phone"> | undefined {

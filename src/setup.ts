@@ -7,7 +7,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import { writeFileSync, existsSync, readFileSync } from "node:fs";
+import { writeFileSync, chmodSync, existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const ENV_PATH = resolve(process.cwd(), ".env");
@@ -52,7 +52,9 @@ function main() {
   }
 
   const merged = mergeEnv(existing, { MCP_API_KEY: apiKey });
-  writeFileSync(ENV_PATH, merged, "utf8");
+  // .env holds secrets: create it owner-only (mode only applies on creation, so chmod existing files too).
+  writeFileSync(ENV_PATH, merged, { encoding: "utf8", mode: 0o600 });
+  chmodSync(ENV_PATH, 0o600);
   console.log(`✓ Written to ${ENV_PATH}`);
 
   console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
@@ -61,8 +63,7 @@ function main() {
   console.log("       yarn build && yarn start\n");
   console.log("  2. Open http://localhost:8787/connect and sign in to your Simplifi account.\n");
   console.log("  3. Add the MCP to Claude Code:");
-  console.log("       claude mcp add simplifi --transport http http://localhost:8787/mcp");
-  console.log("       Configure bearer authentication with the MCP_API_KEY value from .env.\n");
+  console.log(`       claude mcp add simplifi --transport http http://localhost:8787/mcp --header "Authorization: Bearer ${apiKey}"\n`);
   console.log("  4. Start chatting about your finances!\n");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
 }

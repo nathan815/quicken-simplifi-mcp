@@ -81,6 +81,19 @@ function parseRedirectAllowlist(raw: string): string[] {
     .filter(Boolean);
 }
 
+const PLACEHOLDER_JWT_SECRETS = new Set(["replace-with-a-long-random-secret"]);
+
+function loadJwtSecret(optional: boolean): string {
+  const secret = optional ? getOptionalEnv("OAUTH_JWT_SECRET") : getEnv("OAUTH_JWT_SECRET");
+  if (secret === undefined) {
+    return randomBytes(32).toString("hex"); // never a guessable default
+  }
+  if (PLACEHOLDER_JWT_SECRETS.has(secret) || secret.length < 32) {
+    throw new Error("OAUTH_JWT_SECRET must be a random value of at least 32 characters (not the .env.example placeholder).");
+  }
+  return secret;
+}
+
 export function loadConfig(): AppConfig {
   const port = getNumberEnv("PORT", 8787);
   const host = process.env.HOST ?? "0.0.0.0";
@@ -102,9 +115,7 @@ export function loadConfig(): AppConfig {
     oauth: {
       issuer: process.env.OAUTH_ISSUER ?? "simplifi-mcp", // JWT `iss`; deliberately independent of the request host
       audience: process.env.OAUTH_AUDIENCE ?? "simplifi-mcp",
-      jwtSecret: staticApiKey
-        ? getOptionalEnv("OAUTH_JWT_SECRET") ?? randomBytes(32).toString("hex") // never a guessable default
-        : getEnv("OAUTH_JWT_SECRET"),
+      jwtSecret: loadJwtSecret(staticApiKey !== undefined),
       accessTokenTtlSeconds: getNumberEnv("OAUTH_ACCESS_TOKEN_TTL_SECONDS", 900),
       refreshTokenTtlSeconds: getNumberEnv("OAUTH_REFRESH_TOKEN_TTL_SECONDS", 60 * 60 * 24 * 30),
       allowedRedirectUris: parseRedirectAllowlist(process.env.OAUTH_ALLOWED_REDIRECT_URIS ?? ""),

@@ -175,7 +175,7 @@ export function createMcpServer(
     "Add one or more tags to a transaction (merges with existing tags, does not remove others).",
     {
       transactionId: z.string().min(1),
-      tagIds: z.array(z.string().min(1)).min(1),
+      tagIds: z.array(z.string().trim().min(1)).min(1),
     },
     (input) => toolService.tagTransaction(input),
   );
@@ -185,7 +185,7 @@ export function createMcpServer(
     "Remove one or more tags from a transaction by their tag IDs.",
     {
       transactionId: z.string().min(1),
-      tagIds: z.array(z.string().min(1)).min(1),
+      tagIds: z.array(z.string().trim().min(1)).min(1),
     },
     (input) => toolService.untagTransaction(input),
   );

@@ -10,7 +10,7 @@ import type { AppConfig } from "../config.js";
 import { logInfo, logWarn } from "../logger.js";
 import { loginPage, mfaPage, redirectPage, successPage, type MfaInfo } from "./pages.js";
 import { createMcpServer } from "../mcp/server.js";
-import { OAuthService } from "../oauth/oauth-service.js";
+import { OAuthService, type AuthorizeRequest } from "../oauth/oauth-service.js";
 import { SimplifiAuthService } from "../simplifi/auth-service.js";
 import type { AttemptLoginResult } from "../simplifi/auth-service.js";
 import { SimplifiClient } from "../simplifi/client.js";
@@ -147,6 +147,28 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
   const authorizeRateLimit = attemptLimiter(5, true);
   const mfaRateLimit = attemptLimiter(10, false);
 
+  // After Quicken accepts the login: detect the dataset and finish the first sync BEFORE handing the
+  // client an authorization code, so the MCP is never "connected" with an empty cache. Returns false
+  // (having sent an error page) if that fails.
+  const finishSignIn = async (request: AuthorizeRequest, res: Response): Promise<boolean> => {
+    try {
+      await simplifiClient.getDatasetId();
+      await initializeSync();
+    } catch (error) {
+      logWarn("Initial sync after OAuth sign-in failed", { error: error instanceof Error ? error.message : String(error) });
+      res
+        .status(200)
+        .type("html")
+        .send(oauthService.buildAuthorizePage(request, "Signed in, but the initial data sync failed. Please try again."));
+      return false;
+    }
+
+    const code = oauthService.issueAuthorizationCode(request);
+    const redirect = oauthService.buildAuthorizeRedirect(request, code);
+    res.set("Cache-Control", "no-store").status(200).type("html").send(redirectPage(redirect));
+    return true;
+  };
+
   app.get("/oauth/authorize", (req, res) => {
     try {
       const request = oauthService.parseAuthorizeRequest(toRecord(req.query));
@@ -184,10 +206,9 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
         return;
       }
 
-      void simplifiClient.getDatasetId().catch(() => {});
-      const code = oauthService.issueAuthorizationCode(request);
-      const redirect = oauthService.buildAuthorizeRedirect(request, code);
-      res.set("Cache-Control", "no-store").status(200).type("html").send(redirectPage(redirect));
+      if (!(await finishSignIn(request, res))) {
+        return;
+      }
     } catch (error) {
       logWarn("OAuth authorize failed", { error: error instanceof Error ? error.message : String(error) });
       res.status(400).type("text/plain").send(error instanceof Error ? error.message : "Invalid authorize request");
@@ -225,10 +246,9 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
         return;
       }
 
-      void simplifiClient.getDatasetId().catch(() => {});
-      const code = oauthService.issueAuthorizationCode(request);
-      const redirect = oauthService.buildAuthorizeRedirect(request, code);
-      res.set("Cache-Control", "no-store").status(200).type("html").send(redirectPage(redirect));
+      if (!(await finishSignIn(request, res))) {
+        return;
+      }
     } catch (error) {
       res.status(400).type("text/plain").send(error instanceof Error ? error.message : "Invalid MFA request");
     }

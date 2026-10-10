@@ -126,6 +126,11 @@ export class SimplifiAuthService {
       return { status: "mfa_required", pendingId, mfaChannel, email: mfaEmailHint, phone };
     }
 
+    if (![200, 201].includes(authorizeResponse.status)) {
+      const body = (await authorizeResponse.text()).slice(0, 500);
+      throw new Error(`Simplifi authorize failed: status=${authorizeResponse.status}, body=${body}`);
+    }
+
     const token = await this.processSuccessfulAuthorize(authorizeResponse);
     this.db.saveSimplifiTokens(token);
     logInfo("Simplifi browser connect login completed");

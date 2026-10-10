@@ -76,6 +76,16 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     return submitted.length === expected.length && timingSafeEqual(submitted, expected);
   }
 
+  // Externally visible origin: the PUBLIC_BASE_URL override if set, else what the client actually used
+  // (honouring a reverse proxy's X-Forwarded-Proto/Host).
+  const baseUrl = (req: Request): string => {
+    if (config.server.publicBaseUrl) return config.server.publicBaseUrl;
+    const first = (v: string | undefined) => v?.split(",")[0]?.trim();
+    const proto = first(req.header("x-forwarded-proto")) ?? req.protocol;
+    const host = first(req.header("x-forwarded-host")) ?? req.header("host") ?? `localhost:${config.server.port}`;
+    return `${proto}://${host}`;
+  };
+
   app.disable("x-powered-by");
   app.use(
     cors({
@@ -95,12 +105,12 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     res.status(200).json({ ok: true });
   });
 
-  app.get("/.well-known/oauth-authorization-server", (_req, res) => {
-    res.status(200).json(oauthService.getMetadata(config.server.publicBaseUrl));
+  app.get("/.well-known/oauth-authorization-server", (req, res) => {
+    res.status(200).json(oauthService.getMetadata(baseUrl(req)));
   });
 
-  app.get("/.well-known/openid-configuration", (_req, res) => {
-    res.status(200).json(oauthService.getMetadata(config.server.publicBaseUrl));
+  app.get("/.well-known/openid-configuration", (req, res) => {
+    res.status(200).json(oauthService.getMetadata(baseUrl(req)));
   });
 
   app.get("/oauth/authorize", (req, res) => {
@@ -113,7 +123,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
   });
 
   app.post("/oauth/register", (req, res) => {
-    const response = oauthService.buildClientRegistrationResponse(toRecord(req.body), config.server.publicBaseUrl);
+    const response = oauthService.buildClientRegistrationResponse(toRecord(req.body), baseUrl(req));
     res.status(201).json(response);
   });
 
@@ -404,13 +414,13 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     }
   });
 
-  app.get("/", (_req, res) => {
+  app.get("/", (req, res) => {
     res.status(200).json({
       name: "quicken-simplifi-mcp",
       status: "ok",
-      mcp: `${config.server.publicBaseUrl}/mcp`,
-      oauthAuthorize: `${config.server.publicBaseUrl}/oauth/authorize`,
-      oauthToken: `${config.server.publicBaseUrl}/oauth/token`,
+      mcp: `${baseUrl(req)}/mcp`,
+      oauthAuthorize: `${baseUrl(req)}/oauth/authorize`,
+      oauthToken: `${baseUrl(req)}/oauth/token`,
     });
   });
 

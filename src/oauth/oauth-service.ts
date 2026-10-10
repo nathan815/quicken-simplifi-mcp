@@ -53,7 +53,7 @@ export class OAuthService {
 
   public getMetadata(baseUrl: string): Record<string, unknown> {
     return {
-      issuer: this.config.issuer,
+      issuer: baseUrl,
       authorization_endpoint: `${baseUrl}/oauth/authorize`,
       token_endpoint: `${baseUrl}/oauth/token`,
       registration_endpoint: `${baseUrl}/oauth/register`,

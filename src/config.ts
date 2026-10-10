@@ -8,7 +8,8 @@ export interface AppConfig {
   server: {
     host: string;
     port: number;
-    publicBaseUrl: string;
+    /** Optional override. When unset, URLs are derived from each request's Host header. */
+    publicBaseUrl?: string;
     corsOrigin: string;
   };
   cache: {
@@ -83,7 +84,7 @@ function parseRedirectAllowlist(raw: string): string[] {
 export function loadConfig(): AppConfig {
   const port = getNumberEnv("PORT", 8787);
   const host = process.env.HOST ?? "0.0.0.0";
-  const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://localhost:${port}`;
+  const publicBaseUrl = getOptionalEnv("PUBLIC_BASE_URL")?.replace(/\/+$/, "");
   const staticApiKey = getOptionalEnv("MCP_API_KEY");
 
   const cacheDbPath = path.resolve(process.cwd(), process.env.CACHE_DB_PATH ?? "./data/cache.sqlite");
@@ -99,7 +100,7 @@ export function loadConfig(): AppConfig {
       dbPath: cacheDbPath,
     },
     oauth: {
-      issuer: process.env.OAUTH_ISSUER ?? publicBaseUrl,
+      issuer: process.env.OAUTH_ISSUER ?? "simplifi-mcp", // JWT `iss`; deliberately independent of the request host
       audience: process.env.OAUTH_AUDIENCE ?? "simplifi-mcp",
       jwtSecret: staticApiKey
         ? getOptionalEnv("OAUTH_JWT_SECRET") ?? randomBytes(32).toString("hex") // never a guessable default

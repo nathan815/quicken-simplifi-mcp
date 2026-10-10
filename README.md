@@ -94,7 +94,7 @@ Optional but recommended:
 - `ALLOWED_EMAIL` (only this Quicken account may log in; otherwise any valid Quicken login replaces the stored session)
 - `OAUTH_ALLOWED_REDIRECT_URIS` (comma-separated allowlist)
 - `SIMPLIFI_DATASET_ID` (auto-detected after login if unset)
-- `PUBLIC_BASE_URL`
+- `PUBLIC_BASE_URL` (optional; URLs are otherwise derived from the request host. Pin it only if a proxy hides the real host or scheme)
 - `CACHE_DB_PATH`
 
 4. Run in development

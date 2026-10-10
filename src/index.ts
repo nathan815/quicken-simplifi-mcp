@@ -51,10 +51,26 @@ async function main(): Promise<void> {
     notifyActivity: () => syncService.notifyActivity(),
   });
 
+  let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) {
+      logInfo("Forcing exit", { signal });
+      process.exit(1);
+    }
+    shuttingDown = true;
+
     logInfo("Shutting down", { signal });
+    // Last resort so a stuck close can never leave the process hanging.
+    setTimeout(() => process.exit(1), 5000).unref();
+
     syncService.stop();
-    await httpServer.close();
+    try {
+      await httpServer.close();
+    } catch (error) {
+      logError("Error while closing HTTP server", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     db.close();
     process.exit(0);
   };

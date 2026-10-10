@@ -45,6 +45,14 @@ interface TokenEndpointRefreshRequest {
 
 type TokenEndpointRequest = TokenEndpointAuthorizationCodeRequest | TokenEndpointRefreshRequest;
 
+// Claude.ai (web), the Claude desktop app (custom URL scheme) and Meta Muse. Exact matches only.
+const DEFAULT_ALLOWED_REDIRECT_URIS = [
+  "https://claude.ai/api/mcp/auth/callback",
+  "claude://claude.ai/mcp-auth-callback/sdk",
+  "https://agent.meta.ai/api/hatch/oauth/callback",
+];
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
 export class OAuthService {
   public constructor(
     private readonly config: AppConfig["oauth"],
@@ -335,12 +343,31 @@ export class OAuthService {
     return value.length > 0 ? value : undefined;
   }
 
+  /**
+   * Fails closed. An explicit OAUTH_ALLOWED_REDIRECT_URIS list is matched exactly. With no list, only
+   * the built-in Claude/Muse callbacks and loopback URLs (RFC 8252, e.g. Claude Code) are accepted, so a crafted
+   * authorize link can't send the code to an attacker-controlled host.
+   */
   private isRedirectUriAllowed(uri: string): boolean {
-    if (this.config.allowedRedirectUris.length === 0) {
+    if (this.config.allowedRedirectUris.length > 0) {
+      return this.config.allowedRedirectUris.includes(uri);
+    }
+
+    if (DEFAULT_ALLOWED_REDIRECT_URIS.includes(uri)) {
       return true;
     }
 
-    return this.config.allowedRedirectUris.includes(uri);
+    try {
+      const url = new URL(uri);
+      return (
+        url.protocol === "http:" &&
+        LOOPBACK_HOSTS.has(url.hostname) &&
+        url.username === "" &&
+        url.password === ""
+      );
+    } catch {
+      return false;
+    }
   }
 
 }

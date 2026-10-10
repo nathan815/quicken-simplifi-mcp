@@ -38,6 +38,8 @@ const STYLES = `
   button[type=submit]:hover{background:#15803d}
   .error{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px}
   .notice{background:#f0fdf4;border:1px solid #bbf7d0;color:#166534;border-radius:8px;padding:10px 14px;font-size:12px;margin-bottom:20px}
+  a.button{display:block;width:100%;padding:11px;background:#16a34a;color:#fff;border-radius:8px;font-size:15px;font-weight:600;text-align:center;text-decoration:none;margin-top:20px}
+  a.button:hover{background:#15803d}
   .success{text-align:center;padding:8px 0}
   .check{font-size:48px;margin-bottom:12px}
 `;
@@ -135,5 +137,23 @@ export function successPage(): string {
         <h1>Connected!</h1>
         <p class="sub" style="margin:8px 0 0">Your Simplifi account is linked. You can close this tab — the MCP server is ready.</p>
       </div>`,
+  );
+}
+
+/**
+ * Shown after a successful OAuth sign-in instead of a bare 302. Redirects to custom schemes
+ * (e.g. claude://) leave the browser on the previous page, so this page stays visible, says what
+ * happened, and hands off to the client after a moment. The link is the fallback if that is blocked.
+ */
+export function redirectPage(redirectUrl: string): string {
+  return layout(
+    "Simplifi MCP — Signed in",
+    `<div class="success">
+        <div class="check">✅</div>
+        <h1>You're signed in</h1>
+        <p class="sub" style="margin:8px 0 0">Returning to your app… If nothing happens, use the button below. You can close this tab afterwards.</p>
+        <a id="continue" class="button" href="${escapeHtml(redirectUrl)}">Continue</a>
+      </div>
+      <script>setTimeout(function(){location.href=document.getElementById("continue").href},400)</script>`,
   );
 }

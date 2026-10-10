@@ -8,7 +8,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 
 import type { AppConfig } from "../config.js";
 import { logInfo, logWarn } from "../logger.js";
-import { loginPage, mfaPage, successPage, type MfaInfo } from "./pages.js";
+import { loginPage, mfaPage, redirectPage, successPage, type MfaInfo } from "./pages.js";
 import { createMcpServer } from "../mcp/server.js";
 import { OAuthService } from "../oauth/oauth-service.js";
 import { SimplifiAuthService } from "../simplifi/auth-service.js";
@@ -151,7 +151,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
       void simplifiClient.getDatasetId().catch(() => {});
       const code = oauthService.issueAuthorizationCode(request);
       const redirect = oauthService.buildAuthorizeRedirect(request, code);
-      res.redirect(302, redirect);
+      res.set("Cache-Control", "no-store").status(200).type("html").send(redirectPage(redirect));
     } catch (error) {
       logWarn("OAuth authorize failed", { error: error instanceof Error ? error.message : String(error) });
       res.status(400).type("text/plain").send(error instanceof Error ? error.message : "Invalid authorize request");
@@ -192,7 +192,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
       void simplifiClient.getDatasetId().catch(() => {});
       const code = oauthService.issueAuthorizationCode(request);
       const redirect = oauthService.buildAuthorizeRedirect(request, code);
-      res.redirect(302, redirect);
+      res.set("Cache-Control", "no-store").status(200).type("html").send(redirectPage(redirect));
     } catch (error) {
       res.status(400).type("text/plain").send(error instanceof Error ? error.message : "Invalid MFA request");
     }
@@ -459,19 +459,24 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
 
   return {
     close: async () => {
-      for (const [sessionId] of sessions.entries()) {
-        sessions.delete(sessionId);
-      }
-
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolve();
-        });
+      // server.close() only resolves once every connection ends, and MCP clients keep streaming (SSE)
+      // connections open indefinitely, so close the transports and drop remaining connections ourselves.
+      const closing = new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
       });
+
+      await Promise.allSettled([...sessions.values()].map((transport) => transport.close()));
+      sessions.clear();
+      server.closeIdleConnections();
+      // Give in-flight responses a moment to finish, then cut whatever is left.
+      const force = setTimeout(() => server.closeAllConnections(), 1000);
+      force.unref();
+
+      try {
+        await closing;
+      } finally {
+        clearTimeout(force);
+      }
     },
   };
 }

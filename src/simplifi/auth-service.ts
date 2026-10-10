@@ -140,6 +140,8 @@ export class SimplifiAuthService {
 
     const token = await this.processSuccessfulAuthorize(authorizeResponse);
     this.db.saveSimplifiTokens(token);
+    // A fresh login may be a different account; re-detect its dataset instead of reusing the old one.
+    this.db.clearDatasetId();
     logInfo("Simplifi browser connect login completed");
     return { status: "ok" };
   }
@@ -176,6 +178,7 @@ export class SimplifiAuthService {
 
     const token = await this.processSuccessfulAuthorize(authorizeResponse);
     this.db.saveSimplifiTokens(token);
+    this.db.clearDatasetId();
     this.deletePendingMfa(pendingId);
     logInfo("Simplifi MFA login completed");
   }

@@ -295,6 +295,10 @@ export class DatabaseContext {
     return row?.value ?? null;
   }
 
+  public clearDatasetId(): void {
+    this.db.prepare(`DELETE FROM simplifi_config WHERE key = 'dataset_id'`).run();
+  }
+
   public saveDatasetId(id: string): void {
     this.db.prepare(`INSERT INTO simplifi_config (key, value) VALUES ('dataset_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(id);
   }

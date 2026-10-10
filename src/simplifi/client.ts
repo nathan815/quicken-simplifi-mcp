@@ -11,6 +11,7 @@ import type {
   TransactionListResponse,
   TransactionMutationResponse,
 } from "../types.js";
+import { logWarn } from "../logger.js";
 import { SimplifiAuthService } from "./auth-service.js";
 
 interface ListTransactionsInput {
@@ -27,7 +28,6 @@ interface ListReferenceInput {
 }
 
 export class SimplifiClient {
-  private resolvedDatasetId: string | null = null;
 
   public constructor(
     private readonly config: AppConfig["simplifi"],
@@ -38,20 +38,25 @@ export class SimplifiClient {
 
   public async getDatasetId(): Promise<string> {
     if (this.config.datasetId) return this.config.datasetId;
-    if (this.resolvedDatasetId) return this.resolvedDatasetId;
 
+    // Read from the DB each time (cheap) so clearing it on re-login takes effect immediately.
     const stored = this.getStoredDatasetId();
-    if (stored) {
-      this.resolvedDatasetId = stored;
-      return stored;
-    }
+    if (stored) return stored;
 
     const response = await this.listDatasets();
-    const first = response.resources?.[0];
+    const datasets = response.resources ?? [];
+    const first = datasets[0];
     if (!first?.id) {
       throw new Error("Simplifi /datasets returned no datasets. Check your credentials.");
     }
-    this.resolvedDatasetId = first.id;
+
+    if (datasets.length > 1) {
+      logWarn("Multiple Simplifi datasets found; using the first. Set SIMPLIFI_DATASET_ID to choose another.", {
+        chosen: first.id,
+        datasets: datasets.map((d) => ({ id: d.id, name: d.name })),
+      });
+    }
+
     this.saveDatasetId(first.id);
     return first.id;
   }

@@ -92,11 +92,13 @@ The upstream server required `SIMPLIFI_DATASET_ID` — a numeric ID you had to f
 
 After a successful Simplifi login, the server calls `GET /datasets`, takes the first result's `id`, and stores it in a `simplifi_config` SQLite table. `SIMPLIFI_DATASET_ID` is now **optional** in `.env`.
 
+The stored ID is cleared on every fresh credential login (including after MFA), so signing in as a different account re-detects its dataset instead of reusing the previous one. Note this only resets the dataset ID; transactions already cached in SQLite are not cleared, so switching accounts on an existing cache directory still needs a fresh `CACHE_DB_PATH`.
+
 ```
 Login → GET /datasets → store dataset_id → use on all subsequent API calls
 ```
 
-If you have multiple Simplifi datasets and need a specific one, you can still pin it via `SIMPLIFI_DATASET_ID` in `.env` — that takes precedence over the auto-detected value.
+If `/datasets` returns more than one dataset, the first is used and a warning listing every dataset's ID and name is logged. To use a different one, pin it via `SIMPLIFI_DATASET_ID` in `.env` — that takes precedence over the auto-detected value.
 
 **Files changed:** `src/simplifi/client.ts`, `src/db/database.ts`, `src/config.ts`
 

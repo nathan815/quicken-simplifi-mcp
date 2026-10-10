@@ -2,6 +2,7 @@ import jwt from "jsonwebtoken";
 
 import type { AppConfig } from "../config.js";
 import { DatabaseContext } from "../db/database.js";
+import { loginPage, mfaPage } from "../http/pages.js";
 import { randomToken, sha256Base64Url } from "../utils.js";
 
 export interface AuthorizeRequest {
@@ -44,6 +45,14 @@ interface TokenEndpointRefreshRequest {
 
 type TokenEndpointRequest = TokenEndpointAuthorizationCodeRequest | TokenEndpointRefreshRequest;
 
+// Claude.ai (web), the Claude desktop app (custom URL scheme) and Meta Muse. Exact matches only.
+const DEFAULT_ALLOWED_REDIRECT_URIS = [
+  "https://claude.ai/api/mcp/auth/callback",
+  "claude://claude.ai/mcp-auth-callback/sdk",
+  "https://agent.meta.ai/api/hatch/oauth/callback",
+];
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
 export class OAuthService {
   public constructor(
     private readonly config: AppConfig["oauth"],
@@ -52,7 +61,7 @@ export class OAuthService {
 
   public getMetadata(baseUrl: string): Record<string, unknown> {
     return {
-      issuer: this.config.issuer,
+      issuer: baseUrl,
       authorization_endpoint: `${baseUrl}/oauth/authorize`,
       token_endpoint: `${baseUrl}/oauth/token`,
       registration_endpoint: `${baseUrl}/oauth/register`,
@@ -78,11 +87,12 @@ export class OAuthService {
     return {
       client_id: "mcp-client",
       client_id_issued_at: Math.floor(Date.now() / 1000),
+      ...(typeof raw.client_name === "string" ? { client_name: raw.client_name } : {}),
       redirect_uris: redirectUris,
       grant_types: grantTypes,
       response_types: ["code"],
       token_endpoint_auth_method: "none",
-      registration_client_uri: `${baseUrl}/oauth/register`,
+      ...(typeof raw.scope === "string" ? { scope: raw.scope } : {}),
     };
   }
 
@@ -115,10 +125,6 @@ export class OAuthService {
     };
   }
 
-  public validateLogin(username: string, password: string): boolean {
-    return username === this.config.loginUsername && password === this.config.loginPassword;
-  }
-
   public issueAuthorizationCode(request: AuthorizeRequest): string {
     const code = randomToken(32);
     const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString();
@@ -147,111 +153,39 @@ export class OAuthService {
     return redirect.toString();
   }
 
+  private authorizeHiddenFields(request: AuthorizeRequest): Record<string, string | undefined> {
+    return {
+      response_type: request.responseType,
+      client_id: request.clientId,
+      redirect_uri: request.redirectUri,
+      state: request.state,
+      scope: request.scope,
+      code_challenge: request.codeChallenge,
+      code_challenge_method: request.codeChallengeMethod,
+    };
+  }
+
   public buildMfaPage(
     request: AuthorizeRequest,
     pendingId: string,
     mfaInfo: { mfaChannel: string; email?: string; phone?: string },
     errorMessage?: string,
   ): string {
-    const hidden = {
-      response_type: request.responseType,
-      client_id: request.clientId,
-      redirect_uri: request.redirectUri,
-      state: request.state,
-      scope: request.scope,
-      code_challenge: request.codeChallenge,
-      code_challenge_method: request.codeChallengeMethod,
-      pending_mfa_id: pendingId,
-    };
-
-    const hiddenInputs = Object.entries(hidden)
-      .filter(([, value]) => value !== undefined)
-      .map(
-        ([key, value]) =>
-          `<input type="hidden" name="${this.escapeHtml(key)}" value="${this.escapeHtml(String(value))}" />`,
-      )
-      .join("\n");
-
-    const contact = mfaInfo.email
-      ? `email (${this.escapeHtml(mfaInfo.email)})`
-      : mfaInfo.phone
-        ? `phone (${this.escapeHtml(mfaInfo.phone)})`
-        : this.escapeHtml(mfaInfo.mfaChannel);
-
-    const errorSection = errorMessage
-      ? `<p style="color:#b91c1c;font-size:14px;">${this.escapeHtml(errorMessage)}</p>`
-      : "";
-
-    return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Simplifi MCP — MFA Required</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-  </head>
-  <body style="font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;background:#f8fafc;margin:0;padding:32px;">
-    <main style="max-width:420px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;">
-      <h1 style="margin:0 0 8px 0;font-size:20px;">Two-Factor Verification</h1>
-      <p style="margin:0 0 16px 0;color:#475569;font-size:14px;">A verification code was sent to your ${contact}. Enter it below to continue.</p>
-      ${errorSection}
-      <form method="POST" action="/oauth/mfa">
-        ${hiddenInputs}
-        <label style="display:block;margin:0 0 8px 0;font-size:13px;color:#334155;">Verification Code</label>
-        <input type="text" name="mfa_code" inputmode="numeric" autocomplete="one-time-code" required autofocus
-          style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:16px;font-size:18px;letter-spacing:0.15em;" />
-        <button type="submit" style="width:100%;padding:10px 12px;border:0;border-radius:8px;background:#0f766e;color:white;font-weight:600;cursor:pointer;">Verify</button>
-      </form>
-    </main>
-  </body>
-</html>`;
+    return mfaPage({
+      action: "/oauth/mfa",
+      hidden: { ...this.authorizeHiddenFields(request), pending_mfa_id: pendingId },
+      mfaInfo,
+      errorMessage,
+    });
   }
 
   public buildAuthorizePage(request: AuthorizeRequest, errorMessage?: string): string {
-    const hidden = {
-      response_type: request.responseType,
-      client_id: request.clientId,
-      redirect_uri: request.redirectUri,
-      state: request.state,
-      scope: request.scope,
-      code_challenge: request.codeChallenge,
-      code_challenge_method: request.codeChallengeMethod,
-    };
-
-    const hiddenInputs = Object.entries(hidden)
-      .filter(([, value]) => value !== undefined)
-      .map(
-        ([key, value]) =>
-          `<input type="hidden" name="${this.escapeHtml(key)}" value="${this.escapeHtml(String(value))}" />`,
-      )
-      .join("\n");
-
-    const errorSection = errorMessage
-      ? `<p style="color:#b91c1c;font-size:14px;">${this.escapeHtml(errorMessage)}</p>`
-      : "";
-
-    return `<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8" />
-    <title>Simplifi MCP Login</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
-  </head>
-  <body style="font-family:ui-sans-serif,system-ui,-apple-system,sans-serif;background:#f8fafc;margin:0;padding:32px;">
-    <main style="max-width:420px;margin:0 auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:12px;padding:24px;">
-      <h1 style="margin:0 0 8px 0;font-size:20px;">Authorize MCP Access</h1>
-      <p style="margin:0 0 16px 0;color:#475569;font-size:14px;">Sign in to authorize this client to use your Simplifi MCP server.</p>
-      ${errorSection}
-      <form method="POST" action="/oauth/authorize">
-        ${hiddenInputs}
-        <label style="display:block;margin:0 0 8px 0;font-size:13px;color:#334155;">Username</label>
-        <input type="text" name="username" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:12px;" />
-        <label style="display:block;margin:0 0 8px 0;font-size:13px;color:#334155;">Password</label>
-        <input type="password" name="password" required style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cbd5e1;border-radius:8px;margin-bottom:16px;" />
-        <button type="submit" style="width:100%;padding:10px 12px;border:0;border-radius:8px;background:#0f766e;color:white;font-weight:600;cursor:pointer;">Authorize</button>
-      </form>
-    </main>
-  </body>
-</html>`;
+    return loginPage({
+      action: "/oauth/authorize",
+      hidden: this.authorizeHiddenFields(request),
+      subtitle: "Enter your Quicken Simplifi credentials to authorize MCP access.",
+      errorMessage,
+    });
   }
 
   public exchangeToken(raw: Record<string, unknown>): TokenResponse {
@@ -339,7 +273,7 @@ export class OAuthService {
 
   private issueTokenPair(params: { clientId: string; scope?: string }): TokenResponse {
     const accessPayload: AccessTokenClaims = {
-      sub: this.config.loginUsername,
+      sub: "quicken-user",
       client_id: params.clientId,
       scope: params.scope,
     };
@@ -352,7 +286,11 @@ export class OAuthService {
     });
 
     const refreshToken = randomToken(48);
-    const refreshExpiresAt = new Date(Date.now() + this.config.refreshTokenTtlSeconds * 1000).toISOString();
+    // Tie OAuth refresh token lifetime to Quicken session — when Quicken expires, so does this.
+    const simplifiTokens = this.db.getSimplifiTokens();
+    const refreshExpiresAt =
+      simplifiTokens?.refreshTokenExpiresAt ??
+      new Date(Date.now() + this.config.refreshTokenTtlSeconds * 1000).toISOString();
 
     this.db.saveRefreshToken({
       token: refreshToken,
@@ -406,20 +344,31 @@ export class OAuthService {
     return value.length > 0 ? value : undefined;
   }
 
+  /**
+   * Fails closed. An explicit OAUTH_ALLOWED_REDIRECT_URIS list is matched exactly. With no list, only
+   * the built-in Claude/Muse callbacks and loopback URLs (RFC 8252, e.g. Claude Code) are accepted, so a crafted
+   * authorize link can't send the code to an attacker-controlled host.
+   */
   private isRedirectUriAllowed(uri: string): boolean {
-    if (this.config.allowedRedirectUris.length === 0) {
+    if (this.config.allowedRedirectUris.length > 0) {
+      return this.config.allowedRedirectUris.includes(uri);
+    }
+
+    if (DEFAULT_ALLOWED_REDIRECT_URIS.includes(uri)) {
       return true;
     }
 
-    return this.config.allowedRedirectUris.includes(uri);
+    try {
+      const url = new URL(uri);
+      return (
+        url.protocol === "http:" &&
+        LOOPBACK_HOSTS.has(url.hostname) &&
+        url.username === "" &&
+        url.password === ""
+      );
+    } catch {
+      return false;
+    }
   }
 
-  private escapeHtml(value: string): string {
-    return value
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-  }
 }

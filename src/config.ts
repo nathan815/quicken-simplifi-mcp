@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import dotenv from "dotenv";
 
@@ -7,7 +8,8 @@ export interface AppConfig {
   server: {
     host: string;
     port: number;
-    publicBaseUrl: string;
+    /** Optional override. When unset, URLs are derived from each request's Host header. */
+    publicBaseUrl?: string;
     corsOrigin: string;
   };
   cache: {
@@ -19,15 +21,15 @@ export interface AppConfig {
     jwtSecret: string;
     accessTokenTtlSeconds: number;
     refreshTokenTtlSeconds: number;
-    loginUsername: string;
-    loginPassword: string;
     allowedRedirectUris: string[];
+    staticApiKey?: string;
   };
   simplifi: {
     baseUrl: string;
-    email: string;
-    password: string;
-    datasetId: string;
+    email?: string;
+    password?: string;
+    datasetId?: string;
+    allowedEmails: string[];
     clientId: string;
     clientSecret: string;
     redirectUri: string;
@@ -35,6 +37,8 @@ export interface AppConfig {
     threatMetrixRequestId?: string;
     httpTimeoutMs: number;
     syncIntervalMs: number;
+    idleSyncIntervalMs: number;
+    activeWindowMs: number;
     maxStaleMs: number;
     pageLimit: number;
   };
@@ -46,6 +50,11 @@ function getEnv(name: string, fallback?: string): string {
     throw new Error(`Missing required environment variable: ${name}`);
   }
   return value;
+}
+
+function getOptionalEnv(name: string): string | undefined {
+  const value = process.env[name];
+  return value && value.trim() ? value.trim() : undefined;
 }
 
 function getNumberEnv(name: string, fallback: number): number {
@@ -72,10 +81,24 @@ function parseRedirectAllowlist(raw: string): string[] {
     .filter(Boolean);
 }
 
+const PLACEHOLDER_JWT_SECRETS = new Set(["replace-with-a-long-random-secret"]);
+
+function loadJwtSecret(optional: boolean): string {
+  const secret = optional ? getOptionalEnv("OAUTH_JWT_SECRET") : getEnv("OAUTH_JWT_SECRET");
+  if (secret === undefined) {
+    return randomBytes(32).toString("hex"); // never a guessable default
+  }
+  if (PLACEHOLDER_JWT_SECRETS.has(secret) || secret.length < 32) {
+    throw new Error("OAUTH_JWT_SECRET must be a random value of at least 32 characters (not the .env.example placeholder).");
+  }
+  return secret;
+}
+
 export function loadConfig(): AppConfig {
   const port = getNumberEnv("PORT", 8787);
   const host = process.env.HOST ?? "0.0.0.0";
-  const publicBaseUrl = process.env.PUBLIC_BASE_URL ?? `http://localhost:${port}`;
+  const publicBaseUrl = getOptionalEnv("PUBLIC_BASE_URL")?.replace(/\/+$/, "");
+  const staticApiKey = getOptionalEnv("MCP_API_KEY");
 
   const cacheDbPath = path.resolve(process.cwd(), process.env.CACHE_DB_PATH ?? "./data/cache.sqlite");
 
@@ -90,20 +113,20 @@ export function loadConfig(): AppConfig {
       dbPath: cacheDbPath,
     },
     oauth: {
-      issuer: process.env.OAUTH_ISSUER ?? publicBaseUrl,
+      issuer: process.env.OAUTH_ISSUER ?? "simplifi-mcp", // JWT `iss`; deliberately independent of the request host
       audience: process.env.OAUTH_AUDIENCE ?? "simplifi-mcp",
-      jwtSecret: getEnv("OAUTH_JWT_SECRET"),
+      jwtSecret: loadJwtSecret(staticApiKey !== undefined),
       accessTokenTtlSeconds: getNumberEnv("OAUTH_ACCESS_TOKEN_TTL_SECONDS", 900),
       refreshTokenTtlSeconds: getNumberEnv("OAUTH_REFRESH_TOKEN_TTL_SECONDS", 60 * 60 * 24 * 30),
-      loginUsername: getEnv("OAUTH_LOGIN_USERNAME"),
-      loginPassword: getEnv("OAUTH_LOGIN_PASSWORD"),
       allowedRedirectUris: parseRedirectAllowlist(process.env.OAUTH_ALLOWED_REDIRECT_URIS ?? ""),
+      staticApiKey,
     },
     simplifi: {
       baseUrl: process.env.SIMPLIFI_BASE_URL ?? "https://services.quicken.com",
-      email: getEnv("SIMPLIFI_EMAIL"),
-      password: getEnv("SIMPLIFI_PASSWORD"),
-      datasetId: getEnv("SIMPLIFI_DATASET_ID"),
+      email: getOptionalEnv("SIMPLIFI_EMAIL"),
+      password: getOptionalEnv("SIMPLIFI_PASSWORD"),
+      datasetId: getOptionalEnv("SIMPLIFI_DATASET_ID"),
+      allowedEmails: parseRedirectAllowlist(process.env.ALLOWED_EMAIL ?? "").map((e) => e.toLowerCase()),
       clientId: process.env.SIMPLIFI_CLIENT_ID ?? "acme_web",
       clientSecret: process.env.SIMPLIFI_CLIENT_SECRET ?? "BCDCxXwdWYcj@bK6",
       redirectUri: process.env.SIMPLIFI_REDIRECT_URI ?? "https://simplifi.quicken.com/login",
@@ -111,6 +134,8 @@ export function loadConfig(): AppConfig {
       threatMetrixRequestId: process.env.SIMPLIFI_THREAT_METRIX_REQUEST_ID,
       httpTimeoutMs: getNumberEnv("SIMPLIFI_HTTP_TIMEOUT_MS", 30_000),
       syncIntervalMs: getNumberEnv("SIMPLIFI_SYNC_INTERVAL_MS", 60_000),
+    idleSyncIntervalMs: getNumberEnv("SIMPLIFI_IDLE_SYNC_INTERVAL_MS", 10 * 60_000),
+    activeWindowMs: getNumberEnv("SIMPLIFI_ACTIVE_WINDOW_MS", 5 * 60_000),
       maxStaleMs: getNumberEnv("SIMPLIFI_MAX_STALE_MS", 120_000),
       pageLimit: getNumberEnv("SIMPLIFI_PAGE_LIMIT", 5000),
     },

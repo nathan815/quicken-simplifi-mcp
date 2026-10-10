@@ -47,6 +47,12 @@ export interface CoaRef {
   [key: string]: unknown;
 }
 
+export interface TagRef {
+  id: string;
+  name?: string;
+  [key: string]: unknown;
+}
+
 export interface Transaction {
   id: string;
   clientId?: string;
@@ -68,6 +74,7 @@ export interface Transaction {
   knownCategoryId?: string;
   mlInferredPayee?: string;
   isDeleted?: boolean;
+  tags?: TagRef[];
   [key: string]: unknown;
 }
 
@@ -84,6 +91,17 @@ export interface CategoryListResponse {
 export interface TagListResponse {
   metaData: MetaData;
   resources: Tag[];
+}
+
+export interface Dataset {
+  id: string;
+  name?: string;
+  [key: string]: unknown;
+}
+
+export interface DatasetListResponse {
+  metaData?: MetaData;
+  resources?: Dataset[];
 }
 
 export interface EarliestDateOnResponse {

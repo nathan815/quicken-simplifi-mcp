@@ -3,12 +3,15 @@ import { URL } from "node:url";
 import type { AppConfig } from "../config.js";
 import type {
   CategoryListResponse,
+  DatasetListResponse,
   EarliestDateOnResponse,
+  Tag,
   TagListResponse,
   Transaction,
   TransactionListResponse,
   TransactionMutationResponse,
 } from "../types.js";
+import { logWarn } from "../logger.js";
 import { SimplifiAuthService } from "./auth-service.js";
 
 interface ListTransactionsInput {
@@ -25,10 +28,44 @@ interface ListReferenceInput {
 }
 
 export class SimplifiClient {
+
   public constructor(
     private readonly config: AppConfig["simplifi"],
     private readonly authService: SimplifiAuthService,
+    private readonly getStoredDatasetId: () => string | null,
+    private readonly saveDatasetId: (id: string) => void,
   ) {}
+
+  public async getDatasetId(): Promise<string> {
+    if (this.config.datasetId) return this.config.datasetId;
+
+    // Read from the DB each time (cheap) so clearing it on re-login takes effect immediately.
+    const stored = this.getStoredDatasetId();
+    if (stored) return stored;
+
+    const response = await this.listDatasets();
+    const datasets = response.resources ?? [];
+    const first = datasets[0];
+    if (!first?.id) {
+      throw new Error("Simplifi /datasets returned no datasets. Check your credentials.");
+    }
+
+    if (datasets.length > 1) {
+      logWarn("Multiple Simplifi datasets found; using the first. Set SIMPLIFI_DATASET_ID to choose another.", {
+        chosen: first.id,
+        datasets: datasets.map((d) => ({ id: d.id, name: d.name })),
+      });
+    }
+
+    this.saveDatasetId(first.id);
+    return first.id;
+  }
+
+  public async listDatasets(): Promise<DatasetListResponse> {
+    const url = new URL("/datasets", this.config.baseUrl);
+    url.searchParams.set("limit", "100");
+    return this.authedRequestNoDataset<DatasetListResponse>(url.toString(), { method: "GET" });
+  }
 
   public async listTransactions(input: ListTransactionsInput): Promise<TransactionListResponse> {
     const url = new URL("/transactions", this.config.baseUrl);
@@ -93,6 +130,14 @@ export class SimplifiClient {
     return this.authedRequest<CategoryListResponse>(url.toString(), { method: "GET" });
   }
 
+  public async createTag(name: string): Promise<Tag> {
+    const url = new URL("/tags", this.config.baseUrl);
+    return this.authedRequest<Tag>(url.toString(), {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
   public async listTags(input: ListReferenceInput = {}): Promise<TagListResponse> {
     const url = new URL("/tags", this.config.baseUrl);
     url.searchParams.set("limit", String(input.limit ?? 5000));
@@ -108,8 +153,19 @@ export class SimplifiClient {
   }
 
   private async authedRequest<T>(url: string, init: RequestInit): Promise<T> {
-    const token = await this.authService.getAccessToken();
+    const [token, datasetId] = await Promise.all([
+      this.authService.getAccessToken(),
+      this.getDatasetId(),
+    ]);
+    return this.doRequest<T>(url, init, token, datasetId);
+  }
 
+  private async authedRequestNoDataset<T>(url: string, init: RequestInit): Promise<T> {
+    const token = await this.authService.getAccessToken();
+    return this.doRequest<T>(url, init, token);
+  }
+
+  private async doRequest<T>(url: string, init: RequestInit, token: string, datasetId?: string): Promise<T> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.config.httpTimeoutMs);
 
@@ -121,7 +177,7 @@ export class SimplifiClient {
           "content-type": "application/json",
           accept: "application/json",
           authorization: `Bearer ${token}`,
-          "qcs-dataset-id": this.config.datasetId,
+          ...(datasetId ? { "qcs-dataset-id": datasetId } : {}),
           "app-client-id": this.config.clientId,
           "app-release": "6.5.0",
           "app-build": "63580",

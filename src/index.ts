@@ -15,7 +15,12 @@ async function main(): Promise<void> {
   const oauthService = new OAuthService(config.oauth, db);
 
   const simplifiAuthService = new SimplifiAuthService(config.simplifi, db);
-  const simplifiClient = new SimplifiClient(config.simplifi, simplifiAuthService);
+  const simplifiClient = new SimplifiClient(
+    config.simplifi,
+    simplifiAuthService,
+    () => db.getDatasetId(),
+    (id) => db.saveDatasetId(id),
+  );
   const syncService = new SyncService(config.simplifi, db, simplifiClient);
 
   // Warm cache once in background; server startup should remain fast.
@@ -39,13 +44,33 @@ async function main(): Promise<void> {
     config,
     oauthService,
     simplifiAuthService,
+    simplifiClient,
     toolService,
+    isReady: () => db.getSimplifiTokens() !== null && Boolean(db.getSyncState().lastFullSyncAt),
+    initializeSync: () => syncService.ensureInitialized(),
+    notifyActivity: () => syncService.notifyActivity(),
   });
 
+  let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
+    if (shuttingDown) {
+      logInfo("Forcing exit", { signal });
+      process.exit(1);
+    }
+    shuttingDown = true;
+
     logInfo("Shutting down", { signal });
+    // Last resort so a stuck close can never leave the process hanging.
+    setTimeout(() => process.exit(1), 5000).unref();
+
     syncService.stop();
-    await httpServer.close();
+    try {
+      await httpServer.close();
+    } catch (error) {
+      logError("Error while closing HTTP server", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     db.close();
     process.exit(0);
   };

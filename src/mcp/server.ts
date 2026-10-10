@@ -9,14 +9,24 @@ function toToolResponse(payload: unknown): { content: Array<{ type: "text"; text
   };
 }
 
-export function createMcpServer(toolService: TransactionToolService): McpServer {
+export function createMcpServer(
+  toolService: TransactionToolService,
+  notifyActivity: () => void,
+): McpServer {
   const server = new McpServer({
     name: "quicken-simplifi-mcp",
     version: "0.1.0",
   });
   const mcp = server as any;
 
-  mcp.tool(
+  function tool(name: string, description: string, schema: object, handler: (input: any) => Promise<unknown>) {
+    mcp.tool(name, description, schema, async (input: any) => {
+      notifyActivity();
+      return toToolResponse(await handler(input));
+    });
+  }
+
+  tool(
     "list_transactions",
     "List locally cached Simplifi transactions with optional filters and pagination.",
     {
@@ -30,13 +40,10 @@ export function createMcpServer(toolService: TransactionToolService): McpServer 
       includeDeleted: z.boolean().optional(),
       refresh: z.boolean().optional(),
     },
-    async (input: any) => {
-      const result = await toolService.listTransactions(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.listTransactions(input),
   );
 
-  mcp.tool(
+  tool(
     "search_transactions",
     "Search locally cached Simplifi transactions by text with optional filters.",
     {
@@ -51,52 +58,40 @@ export function createMcpServer(toolService: TransactionToolService): McpServer 
       includeDeleted: z.boolean().optional(),
       refresh: z.boolean().optional(),
     },
-    async (input: any) => {
-      const result = await toolService.searchTransactions(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.searchTransactions(input),
   );
 
-  mcp.tool(
+  tool(
     "get_transaction",
     "Get a single transaction by id from local cache (with sync-on-miss).",
     {
       transactionId: z.string().min(1),
       refreshOnMiss: z.boolean().optional(),
     },
-    async (input: any) => {
-      const result = await toolService.getTransaction(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.getTransaction(input),
   );
 
-  mcp.tool(
+  tool(
     "update_transaction",
     "Update a Simplifi transaction by sending a full upsert payload merged from cache + patch.",
     {
       transactionId: z.string().min(1),
       patch: z.preprocess((v) => (typeof v === "string" ? JSON.parse(v) : v), z.record(z.any())),
     },
-    async (input: any) => {
-      const result = await toolService.updateTransaction(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.updateTransaction(input),
   );
 
-  mcp.tool(
+  tool(
     "categorize_transaction",
     "Convenience wrapper to set a transaction category (sets coa.type=CATEGORY and coa.id=<categoryId>).",
     {
       transactionId: z.string().min(1),
       categoryId: z.string().min(1),
     },
-    async (input: any) => {
-      const result = await toolService.categorizeTransaction(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.categorizeTransaction(input),
   );
 
-  mcp.tool(
+  tool(
     "list_uncategorized_transactions",
     "List transactions that look uncategorized (coa.type=UNCATEGORIZED or coa.id=0).",
     {
@@ -110,13 +105,10 @@ export function createMcpServer(toolService: TransactionToolService): McpServer 
       includeDeleted: z.boolean().optional(),
       refresh: z.boolean().optional(),
     },
-    async (input: any) => {
-      const result = await toolService.listUncategorizedTransactions(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.listUncategorizedTransactions(input),
   );
 
-  mcp.tool(
+  tool(
     "search_merchants",
     "Search merchants (payee names) from the cached transaction DB and return frequency counts.",
     {
@@ -124,26 +116,20 @@ export function createMcpServer(toolService: TransactionToolService): McpServer 
       limit: z.coerce.number().int().min(1).max(200).optional(),
       includeDeleted: z.boolean().optional(),
     },
-    async (input: any) => {
-      const result = await toolService.searchMerchants(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.searchMerchants(input),
   );
 
-  mcp.tool(
+  tool(
     "list_categories",
     "List Simplifi categories (synced and cached locally).",
     {
       refresh: z.boolean().optional(),
       limit: z.coerce.number().int().min(1).max(5000).optional(),
     },
-    async (input: any) => {
-      const result = await toolService.listCategories(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.listCategories(input),
   );
 
-  mcp.tool(
+  tool(
     "search_categories",
     "Search Simplifi categories by name (synced and cached locally).",
     {
@@ -151,26 +137,29 @@ export function createMcpServer(toolService: TransactionToolService): McpServer 
       refresh: z.boolean().optional(),
       limit: z.coerce.number().int().min(1).max(5000).optional(),
     },
-    async (input: any) => {
-      const result = await toolService.searchCategories(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.searchCategories(input),
   );
 
-  mcp.tool(
+  tool(
+    "create_tag",
+    "Create a new tag in Simplifi and add it to the local cache.",
+    {
+      name: z.string().trim().min(1),
+    },
+    (input) => toolService.createTag(input),
+  );
+
+  tool(
     "list_tags",
     "List Simplifi tags (synced and cached locally).",
     {
       refresh: z.boolean().optional(),
       limit: z.coerce.number().int().min(1).max(5000).optional(),
     },
-    async (input: any) => {
-      const result = await toolService.listTags(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.listTags(input),
   );
 
-  mcp.tool(
+  tool(
     "search_tags",
     "Search Simplifi tags by name (synced and cached locally).",
     {
@@ -178,13 +167,69 @@ export function createMcpServer(toolService: TransactionToolService): McpServer 
       refresh: z.boolean().optional(),
       limit: z.coerce.number().int().min(1).max(5000).optional(),
     },
-    async (input: any) => {
-      const result = await toolService.searchTags(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.searchTags(input),
   );
 
-  mcp.tool(
+  tool(
+    "tag_transaction",
+    "Add one or more tags to a transaction (merges with existing tags, does not remove others).",
+    {
+      transactionId: z.string().min(1),
+      tagIds: z.array(z.string().trim().min(1)).min(1),
+    },
+    (input) => toolService.tagTransaction(input),
+  );
+
+  tool(
+    "untag_transaction",
+    "Remove one or more tags from a transaction by their tag IDs.",
+    {
+      transactionId: z.string().min(1),
+      tagIds: z.array(z.string().trim().min(1)).min(1),
+    },
+    (input) => toolService.untagTransaction(input),
+  );
+
+  tool(
+    "set_transaction_tags",
+    "Replace all tags on a transaction with exactly the provided tag IDs (overwrites existing tags).",
+    {
+      transactionId: z.string().min(1),
+      tagIds: z.array(z.string().trim().min(1)),
+    },
+    (input) => toolService.setTransactionTags(input),
+  );
+
+  tool(
+    "set_transaction_memo",
+    "Set the memo/note text on a transaction. Pass an empty string to clear the memo.",
+    {
+      transactionId: z.string().min(1),
+      memo: z.string(),
+    },
+    (input) => toolService.setTransactionMemo(input),
+  );
+
+  tool(
+    "list_transactions_by_tag",
+    "List transactions that have a specific tag applied, identified by tagId or tagName.",
+    {
+      tagId: z.string().optional(),
+      tagName: z.string().optional(),
+      limit: z.coerce.number().int().min(1).max(200).optional(),
+      cursor: z.string().optional(),
+      accountId: z.string().optional(),
+      dateFrom: z.string().optional(),
+      dateTo: z.string().optional(),
+      minAmount: z.number().optional(),
+      maxAmount: z.number().optional(),
+      includeDeleted: z.boolean().optional(),
+      refresh: z.boolean().optional(),
+    },
+    (input) => toolService.listTransactionsByTag(input),
+  );
+
+  tool(
     "suggest_categories_for_merchant",
     "Suggest likely categories for a merchant based on your historical transactions in the local cache.",
     {
@@ -193,10 +238,7 @@ export function createMcpServer(toolService: TransactionToolService): McpServer 
       matchMode: z.enum(["exact", "contains"]).optional(),
       refreshCategories: z.boolean().optional(),
     },
-    async (input: any) => {
-      const result = await toolService.suggestCategoriesForMerchant(input);
-      return toToolResponse(result);
-    },
+    (input) => toolService.suggestCategoriesForMerchant(input),
   );
 
   return server;

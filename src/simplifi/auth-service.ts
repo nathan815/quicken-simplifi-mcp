@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { AppConfig } from "../config.js";
 import { logInfo, logWarn } from "../logger.js";
 import type { SimplifiTokenSet } from "../types.js";
-import { isExpired, nowIso } from "../utils.js";
+import { isExpired, nowIso, sha256Base64Url } from "../utils.js";
 import { DatabaseContext } from "../db/database.js";
 
 const AUTHORIZATION_SKEW_MS = 60_000;
@@ -16,6 +16,10 @@ interface PendingMfa {
   phone?: string;
   threatMetrixSessionId: string;
   expiresAt: number;
+  // credentials held in-memory only for the duration of the connect flow
+  loginEmail?: string;
+  loginPassword?: string;
+  expiryTimer: NodeJS.Timeout;
 }
 
 export type AttemptLoginResult =
@@ -30,6 +34,7 @@ export class SimplifiAuthService {
     private readonly db: DatabaseContext,
   ) {}
 
+
   public async getAccessToken(): Promise<string> {
     const cached = this.db.getSimplifiTokens();
 
@@ -43,78 +48,86 @@ export class SimplifiAuthService {
         this.db.saveSimplifiTokens(refreshed);
         return refreshed.accessToken;
       } catch (error) {
-        logWarn("Simplifi token refresh failed; attempting credential re-login", {
+        logWarn("Simplifi token refresh failed", {
           error: error instanceof Error ? error.message : String(error),
         });
+        this.db.deleteSimplifiTokens();
       }
+    }
+
+    if (cached) this.db.deleteSimplifiTokens();
+
+    // No .env credentials to fall back on — revoke OAuth tokens so Claude.ai triggers re-auth.
+    if (!this.config.email || !this.config.password) {
+      this.db.revokeAllOAuthRefreshTokens();
+      throw new Error(
+        "Quicken session expired. Please re-authenticate via OAuth.",
+      );
     }
 
     const created = await this.loginWithCredentials();
     this.db.saveSimplifiTokens(created);
+    this.bindAccount(this.config.email);
     return created.accessToken;
   }
 
   /**
-   * Attempts to ensure valid Simplifi tokens exist. Used by the OAuth authorization
-   * flow so that MFA can be handled interactively in the browser before the MCP
-   * client receives its authorization code.
-   *
-   * Returns { status: "ok" } if tokens are already valid or login succeeded without MFA.
-   * Returns { status: "mfa_required", ... } if Simplifi sent a 202 MFA challenge.
+   * Login using explicit credentials (browser connect flow — credentials never written to disk).
+   * If MFA is required, returns a pendingId that must be resolved via completeMfaLogin().
    */
-  public async attemptLogin(): Promise<AttemptLoginResult> {
-    const cached = this.db.getSimplifiTokens();
-
-    if (cached && !isExpired(cached.accessTokenExpiresAt, AUTHORIZATION_SKEW_MS)) {
-      return { status: "ok" };
+  public async attemptLoginWithCredentials(loginEmail: string, loginPassword: string): Promise<AttemptLoginResult> {
+    // Single-user server: refuse other accounts before anything is sent to Quicken, so a stranger
+    // can't replace the stored session.
+    if (this.config.allowedEmails.length > 0 && !this.config.allowedEmails.includes(loginEmail.trim().toLowerCase())) {
+      logWarn("Login rejected: email not in ALLOWED_EMAIL");
+      throw new Error("This account is not allowed to use this server.");
     }
 
-    if (cached?.refreshToken) {
-      try {
-        const refreshed = await this.refreshToken(cached.refreshToken);
-        this.db.saveSimplifiTokens(refreshed);
-        return { status: "ok" };
-      } catch (error) {
-        logWarn("Simplifi token refresh failed during OAuth flow; attempting credential re-login", {
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
-
-    const threatMetrixSessionId = this.config.threatMetrixSessionId ?? randomUUID();
-    const threatMetrixRequestId = this.config.threatMetrixRequestId ?? null;
-
+    const threatMetrixSessionId = randomUUID();
     const authorizeResponse = await this.callAuthorize({
+      email: loginEmail,
+      password: loginPassword,
       mfaChannel: null,
       mfaCode: null,
       mfaId: null,
       threatMetrixSessionId,
-      threatMetrixRequestId,
+      threatMetrixRequestId: null,
     });
 
     if (authorizeResponse.status === 202) {
       const body = (await authorizeResponse.json()) as Record<string, unknown>;
       const mfaId = String(body.mfaId ?? "");
       const mfaChannel = typeof body.mfaChannel === "string" ? body.mfaChannel : "EMAIL";
-      const email = typeof body.email === "string" ? body.email : undefined;
+      const mfaEmailHint = typeof body.email === "string" ? body.email : undefined;
       const phone = typeof body.phone === "string" ? body.phone : undefined;
 
       const pendingId = randomUUID();
-      this.pendingMfaMap.set(pendingId, {
+      const pending: PendingMfa = {
         mfaId,
         mfaChannel,
-        email,
+        email: mfaEmailHint,
         phone,
         threatMetrixSessionId,
         expiresAt: Date.now() + 10 * 60 * 1000,
-      });
+        loginEmail,
+        loginPassword,
+        expiryTimer: setTimeout(() => this.deletePendingMfa(pendingId), 10 * 60 * 1000),
+      };
+      pending.expiryTimer.unref();
+      this.pendingMfaMap.set(pendingId, pending);
 
-      return { status: "mfa_required", pendingId, mfaChannel, email, phone };
+      return { status: "mfa_required", pendingId, mfaChannel, email: mfaEmailHint, phone };
+    }
+
+    if (![200, 201].includes(authorizeResponse.status)) {
+      const body = (await authorizeResponse.text()).slice(0, 500);
+      throw new Error(`Simplifi authorize failed: status=${authorizeResponse.status}, body=${body}`);
     }
 
     const token = await this.processSuccessfulAuthorize(authorizeResponse);
     this.db.saveSimplifiTokens(token);
-    logInfo("Simplifi credential login completed");
+    this.bindAccount(loginEmail);
+    logInfo("Simplifi browser connect login completed");
     return { status: "ok" };
   }
 
@@ -129,11 +142,13 @@ export class SimplifiAuthService {
     }
 
     if (Date.now() > pending.expiresAt) {
-      this.pendingMfaMap.delete(pendingId);
+      this.deletePendingMfa(pendingId);
       throw new Error("MFA session expired. Please restart the authorization flow.");
     }
 
     const authorizeResponse = await this.callAuthorize({
+      email: pending.loginEmail,
+      password: pending.loginPassword,
       mfaChannel: pending.mfaChannel,
       mfaCode,
       mfaId: pending.mfaId,
@@ -148,16 +163,47 @@ export class SimplifiAuthService {
 
     const token = await this.processSuccessfulAuthorize(authorizeResponse);
     this.db.saveSimplifiTokens(token);
-    this.pendingMfaMap.delete(pendingId);
+    this.bindAccount(pending.loginEmail);
+    this.deletePendingMfa(pendingId);
     logInfo("Simplifi MFA login completed");
+  }
+
+  /**
+   * Tie the local cache to the account that is logged in. If a different account (or an unknown one,
+   * for a cache that predates this check) signs in, drop the cached data so it is never served to,
+   * or mixed with, the new account. The dataset id is always re-detected after a fresh login.
+   */
+  private bindAccount(email: string | undefined): void {
+    if (!email) {
+      return;
+    }
+
+    const fingerprint = sha256Base64Url(email.trim().toLowerCase());
+    const stored = this.db.getAccountFingerprint();
+
+    if (stored !== fingerprint && (stored !== null || this.db.hasCachedData())) {
+      logWarn("Different Simplifi account detected; clearing locally cached data");
+      this.db.resetAccountData();
+    }
+
+    this.db.saveAccountFingerprint(fingerprint);
+    this.db.clearDatasetId();
   }
 
   public getPendingMfaInfo(pendingId: string): Pick<PendingMfa, "mfaChannel" | "email" | "phone"> | undefined {
     const pending = this.pendingMfaMap.get(pendingId);
     if (!pending || Date.now() > pending.expiresAt) {
+      if (pending) this.deletePendingMfa(pendingId);
       return undefined;
     }
     return { mfaChannel: pending.mfaChannel, email: pending.email, phone: pending.phone };
+  }
+
+  private deletePendingMfa(pendingId: string): void {
+    const pending = this.pendingMfaMap.get(pendingId);
+    if (!pending) return;
+    clearTimeout(pending.expiryTimer);
+    this.pendingMfaMap.delete(pendingId);
   }
 
   private async loginWithCredentials(): Promise<SimplifiTokenSet> {
@@ -190,6 +236,8 @@ export class SimplifiAuthService {
   }
 
   private async callAuthorize(opts: {
+    email?: string;
+    password?: string;
     mfaChannel: string | null;
     mfaCode: string | null;
     mfaId: string | null;
@@ -202,8 +250,8 @@ export class SimplifiAuthService {
       method: "POST",
       body: JSON.stringify({
         clientId: this.config.clientId,
-        username: this.config.email,
-        password: this.config.password,
+        username: opts.email ?? this.config.email,
+        password: opts.password ?? this.config.password,
         redirectUri: this.config.redirectUri,
         responseType: "code",
         mfaChannel: opts.mfaChannel,

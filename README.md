@@ -12,7 +12,13 @@ It provides MCP tools:
 - `search_merchants`
 - `list_categories` / `search_categories`
 - `list_tags` / `search_tags`
+- `create_tag` — create a Simplifi tag
 - `suggest_categories_for_merchant`
+- `tag_transaction` — add tags to a transaction (merges, does not remove existing)
+- `untag_transaction` — remove specific tags from a transaction
+- `set_transaction_tags` — replace all tags on a transaction
+- `set_transaction_memo` — set or clear the memo/note on a transaction
+- `list_transactions_by_tag` — list transactions filtered by tag ID or name
 
 It includes:
 - local transaction cache (SQLite)
@@ -80,18 +86,15 @@ cp .env.example .env
 
 3. Fill required variables in `.env`
 
-Required minimum:
-- `OAUTH_JWT_SECRET`
-- `OAUTH_LOGIN_USERNAME`
-- `OAUTH_LOGIN_PASSWORD`
-- `SIMPLIFI_EMAIL`
-- `SIMPLIFI_PASSWORD`
-- `SIMPLIFI_DATASET_ID`
-- `SIMPLIFI_THREAT_METRIX_SESSION_ID` (recommended; required by current Simplifi authorize flow)
+Required minimum (one of):
+- `OAUTH_JWT_SECRET` — for OAuth clients such as Claude.ai. Signing in happens in the browser at `/oauth/authorize` with your Quicken email and password; no Simplifi credentials are stored on disk. Redirects fail closed: with `OAUTH_ALLOWED_REDIRECT_URIS` unset, only `https://claude.ai/api/mcp/auth/callback`, `claude://claude.ai/mcp-auth-callback/sdk` (Claude desktop), `https://agent.meta.ai/api/hatch/oauth/callback` (Meta Muse) and loopback URLs (`http://localhost`, `127.0.0.1`, `[::1]`, any port) are accepted. Set the allowlist explicitly for any other client.
+- `MCP_API_KEY` — a static bearer token for clients that cannot run OAuth. This also enables the `/connect` login page. Keep `HOST` on a private interface.
 
 Optional but recommended:
-- `OAUTH_ALLOWED_REDIRECT_URIS` (comma-separated allowlist)
-- `PUBLIC_BASE_URL`
+- `ALLOWED_EMAIL` (only this Quicken account may log in; otherwise any valid Quicken login replaces the stored session)
+- `OAUTH_ALLOWED_REDIRECT_URIS` (comma-separated, matched exactly; replaces the defaults above, so include every callback you need)
+- `SIMPLIFI_DATASET_ID` (auto-detected after login if unset)
+- `PUBLIC_BASE_URL` (optional; URLs are otherwise derived from the request host. Pin it only if a proxy hides the real host or scheme)
 - `CACHE_DB_PATH`
 
 4. Run in development
@@ -186,6 +189,12 @@ Inputs:
 - `refresh` (optional)
 - `limit` (optional, 1-5000)
 
+### `create_tag`
+Inputs:
+- `name` (required)
+
+Creates a new Simplifi tag.
+
 ### `suggest_categories_for_merchant`
 Inputs:
 - `merchant` (required)
@@ -194,6 +203,37 @@ Inputs:
 - `refreshCategories` (optional)
 
 Returns the most common categories historically used for that merchant in your cached transactions (joined to category names when available).
+
+### `tag_transaction`
+Inputs:
+- `transactionId` (required)
+- `tagIds` (required string array — list of tag IDs to add)
+
+Adds tags to a transaction without removing any existing tags. Use `list_tags` to get tag IDs first.
+
+### `untag_transaction`
+Inputs:
+- `transactionId` (required)
+- `tagIds` (required string array — tag IDs to remove)
+
+### `set_transaction_tags`
+Inputs:
+- `transactionId` (required)
+- `tagIds` (required string array — exact set of tag IDs; pass `[]` to clear all tags)
+
+Replaces all tags on a transaction with the provided list.
+
+### `set_transaction_memo`
+Inputs:
+- `transactionId` (required)
+- `memo` (required string; pass `""` to clear the memo)
+
+### `list_transactions_by_tag`
+Inputs:
+- `tagId` OR `tagName` (one required)
+- same optional filters as `list_transactions`
+
+Returns transactions that have the specified tag applied. Uses SQLite `json_each` to query the tags array in cached JSON.
 
 ## Production Deployment
 
@@ -240,7 +280,7 @@ docker run -d \
 
 - Treat `.env` as sensitive.
 - Use a strong `OAUTH_JWT_SECRET` (32+ random bytes).
-- Set `OAUTH_ALLOWED_REDIRECT_URIS` in production.
+- Set `OAUTH_ALLOWED_REDIRECT_URIS` and `ALLOWED_EMAIL` in production.
 - Put the server behind HTTPS.
 - Restrict network access (firewall, VPN, or zero-trust access policy).
 

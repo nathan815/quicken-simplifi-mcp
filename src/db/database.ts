@@ -203,6 +203,11 @@ export class DatabaseContext {
       );
       CREATE INDEX IF NOT EXISTS idx_tags_name ON tags (name);
 
+      CREATE TABLE IF NOT EXISTS simplifi_config (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS reference_sync_state (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         categories_last_as_of TEXT,
@@ -252,6 +257,10 @@ export class DatabaseContext {
     };
   }
 
+  public deleteSimplifiTokens(): void {
+    this.db.prepare("DELETE FROM simplifi_tokens WHERE id = 1").run();
+  }
+
   public saveSimplifiTokens(tokens: SimplifiTokenSet): void {
     this.db
       .prepare(
@@ -279,6 +288,52 @@ export class DatabaseContext {
         refreshTokenExpiresAt: tokens.refreshTokenExpiresAt ?? null,
         updatedAt: nowIso(),
       });
+  }
+
+  public getDatasetId(): string | null {
+    const row = this.db.prepare(`SELECT value FROM simplifi_config WHERE key = 'dataset_id'`).get() as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  public getAccountFingerprint(): string | null {
+    const row = this.db.prepare(`SELECT value FROM simplifi_config WHERE key = 'account_fingerprint'`).get() as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  public saveAccountFingerprint(fingerprint: string): void {
+    this.db.prepare(`INSERT INTO simplifi_config (key, value) VALUES ('account_fingerprint', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(fingerprint);
+  }
+
+  public hasCachedData(): boolean {
+    return this.db.prepare(`SELECT 1 FROM transactions LIMIT 1`).get() !== undefined;
+  }
+
+  /**
+   * Drop everything cached from a Simplifi account (data, sync cursors, dataset id) so it can be
+   * re-synced. Keeps Simplifi tokens and OAuth state.
+   */
+  public resetAccountData(): void {
+    const run = this.db.transaction(() => {
+      this.db.exec(`
+        DELETE FROM transactions;
+        DELETE FROM categories;
+        DELETE FROM tags;
+        DELETE FROM simplifi_config WHERE key = 'dataset_id';
+        UPDATE sync_state SET date_on_after = NULL, last_as_of = NULL, last_full_sync_at = NULL,
+          last_sync_at = NULL, sync_status = NULL, last_error = NULL WHERE id = 1;
+        UPDATE reference_sync_state SET categories_last_as_of = NULL, categories_last_sync_at = NULL,
+          tags_last_as_of = NULL, tags_last_sync_at = NULL, last_error = NULL WHERE id = 1;
+      `);
+    });
+    run();
+  }
+
+  public clearDatasetId(): void {
+    this.db.prepare(`DELETE FROM simplifi_config WHERE key = 'dataset_id'`).run();
+  }
+
+  public saveDatasetId(id: string): void {
+    this.db.prepare(`INSERT INTO simplifi_config (key, value) VALUES ('dataset_id', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(id);
   }
 
   public getSyncState(): SyncState {
@@ -723,6 +778,12 @@ export class DatabaseContext {
       .run(nowIso(), sha256Base64Url(token));
   }
 
+  public revokeAllOAuthRefreshTokens(): void {
+    this.db
+      .prepare(`UPDATE oauth_refresh_tokens SET revoked_at = ? WHERE revoked_at IS NULL`)
+      .run(nowIso());
+  }
+
   public getReferenceSyncState(): ReferenceSyncState {
     const row = this.db
       .prepare(
@@ -962,6 +1023,37 @@ export class DatabaseContext {
           .all(limit) as TagRow[]));
 
     return rows.map((row) => JSON.parse(row.raw_json) as Tag);
+  }
+
+  public listTransactionsByTag(query: TransactionQuery & { tagId: string }): TransactionPage {
+    const offset = decodeCursor(query.cursor);
+    const limit = Math.min(Math.max(query.limit, 1), 200);
+
+    const where: string[] = [
+      `EXISTS (
+        SELECT 1 FROM json_each(transactions.raw_json, '$.tags') AS tag_item
+        WHERE json_extract(tag_item.value, '$.id') = ?
+      )`,
+    ];
+    const values: unknown[] = [query.tagId];
+
+    if (query.accountId) { where.push("account_id = ?"); values.push(query.accountId); }
+    if (query.dateFrom) { where.push("posted_on >= ?"); values.push(query.dateFrom); }
+    if (query.dateTo) { where.push("posted_on <= ?"); values.push(query.dateTo); }
+    if (typeof query.minAmount === "number") { where.push("amount >= ?"); values.push(query.minAmount); }
+    if (typeof query.maxAmount === "number") { where.push("amount <= ?"); values.push(query.maxAmount); }
+    if (!query.includeDeleted) { where.push("is_deleted = 0"); }
+
+    const whereClause = `WHERE ${where.join(" AND ")}`;
+    const total = (this.db.prepare(`SELECT COUNT(*) AS count FROM transactions ${whereClause}`).get(...values) as CountRow).count;
+
+    const rows = this.db
+      .prepare(`SELECT raw_json FROM transactions ${whereClause} ORDER BY posted_on DESC, id DESC LIMIT ? OFFSET ?`)
+      .all(...values, limit + 1, offset) as TransactionRow[];
+
+    const hasNext = rows.length > limit;
+    const items = rows.slice(0, limit).map((row) => JSON.parse(row.raw_json) as Transaction);
+    return { items, total, nextCursor: hasNext ? encodeCursor(offset + limit) : undefined };
   }
 
   public searchMerchants(query: { q: string; limit?: number; includeDeleted?: boolean }): Array<{ merchant: string; count: number }> {

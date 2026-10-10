@@ -87,7 +87,7 @@ cp .env.example .env
 3. Fill required variables in `.env`
 
 Required minimum (one of):
-- `OAUTH_JWT_SECRET` — for OAuth clients such as Claude.ai. Signing in happens in the browser at `/oauth/authorize` with your Quicken email and password; no Simplifi credentials are stored on disk. Redirects fail closed: with `OAUTH_ALLOWED_REDIRECT_URIS` unset, only `https://claude.ai/api/mcp/auth/callback`, `claude://claude.ai/mcp-auth-callback/sdk` (Claude desktop), `https://agent.meta.ai/api/hatch/oauth/callback` (Meta Muse) and loopback URLs (`http://localhost`, `127.0.0.1`, `[::1]`, any port) are accepted. Set the allowlist explicitly for any other client.
+- `OAUTH_JWT_SECRET` — for OAuth clients such as Claude.ai. Signing in happens in the browser at `/oauth/authorize` with your Quicken email and password; no Simplifi credentials are stored on disk. Redirects fail closed: with `OAUTH_ALLOWED_REDIRECT_URIS` unset, only `https://claude.ai/api/mcp/auth/callback`, `https://claude.ai/api/mcp/auth_callback`, `claude://claude.ai/mcp-auth-callback/sdk` (Claude desktop), `https://agent.meta.ai/api/hatch/oauth/callback` (Meta Muse) and loopback URLs (`http://localhost`, `127.0.0.1`, `[::1]`, any port) are accepted. Set the allowlist explicitly for any other client.
 - `MCP_API_KEY` — a static bearer token for clients that cannot run OAuth. This also enables the `/connect` login page. Keep `HOST` on a private interface.
 
 Optional but recommended:

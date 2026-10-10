@@ -48,6 +48,7 @@ type TokenEndpointRequest = TokenEndpointAuthorizationCodeRequest | TokenEndpoin
 // Claude.ai (web), the Claude desktop app (custom URL scheme) and Meta Muse. Exact matches only.
 const DEFAULT_ALLOWED_REDIRECT_URIS = [
   "https://claude.ai/api/mcp/auth/callback",
+  "https://claude.ai/api/mcp/auth_callback",
   "claude://claude.ai/mcp-auth-callback/sdk",
   "https://agent.meta.ai/api/hatch/oauth/callback",
 ];

@@ -86,15 +86,14 @@ cp .env.example .env
 
 3. Fill required variables in `.env`
 
-Required minimum:
-- `OAUTH_JWT_SECRET`
-- `SIMPLIFI_EMAIL`
-- `SIMPLIFI_PASSWORD`
-- `SIMPLIFI_DATASET_ID`
-- `SIMPLIFI_THREAT_METRIX_SESSION_ID` (recommended; required by current Simplifi authorize flow)
+Required minimum (one of):
+- `OAUTH_JWT_SECRET` — for OAuth clients such as Claude.ai. Signing in happens in the browser at `/oauth/authorize` with your Quicken email and password; no Simplifi credentials are stored on disk.
+- `MCP_API_KEY` — a static bearer token for clients that cannot run OAuth. This also enables the `/connect` login page. Keep `HOST` on a private interface.
 
 Optional but recommended:
+- `ALLOWED_EMAIL` (only this Quicken account may log in; otherwise any valid Quicken login replaces the stored session)
 - `OAUTH_ALLOWED_REDIRECT_URIS` (comma-separated allowlist)
+- `SIMPLIFI_DATASET_ID` (auto-detected after login if unset)
 - `PUBLIC_BASE_URL`
 - `CACHE_DB_PATH`
 
@@ -281,7 +280,7 @@ docker run -d \
 
 - Treat `.env` as sensitive.
 - Use a strong `OAUTH_JWT_SECRET` (32+ random bytes).
-- Set `OAUTH_ALLOWED_REDIRECT_URIS` in production.
+- Set `OAUTH_ALLOWED_REDIRECT_URIS` and `ALLOWED_EMAIL` in production.
 - Put the server behind HTTPS.
 - Restrict network access (firewall, VPN, or zero-trust access policy).
 

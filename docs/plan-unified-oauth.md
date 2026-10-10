@@ -1,5 +1,7 @@
 # Plan: Unified OAuth Flow (No Stored Credentials)
 
+> **Status: implemented.** Deviations from the plan below: `/connect` was kept (served only when `MCP_API_KEY` is set, for clients that cannot do OAuth); `MCP_API_KEY` is an opt-in alternative to OAuth JWTs on `/mcp`; and `ALLOWED_EMAIL` restricts which Quicken account may log in.
+
 ## Problem
 
 The current auth setup has two separate credential concerns:

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * One-time setup: generates an MCP_API_KEY and writes .env.
- * Simplifi credentials are NOT handled here — they're entered via the browser
- * connect page (http://localhost:8787/connect) when the server starts.
+ * Simplifi credentials are NOT handled here — you enter them in the browser at
+ * http://localhost:8787/connect (served only while MCP_API_KEY is set).
  * Run with: yarn setup
  */
 
@@ -57,9 +57,9 @@ function main() {
 
   console.log("\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
   console.log("Next steps:\n");
-  console.log("  1. Start the server (a browser window will open to sign in):");
+  console.log("  1. Start the server:");
   console.log("       yarn build && yarn start\n");
-  console.log("  2. Sign in to your Simplifi account in the browser.\n");
+  console.log("  2. Open http://localhost:8787/connect and sign in to your Simplifi account.\n");
   console.log("  3. Add the MCP to Claude Code:");
   console.log("       claude mcp add simplifi --transport http http://localhost:8787/mcp");
   console.log("       Configure bearer authentication with the MCP_API_KEY value from .env.\n");

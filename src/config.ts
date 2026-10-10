@@ -28,6 +28,7 @@ export interface AppConfig {
     email?: string;
     password?: string;
     datasetId?: string;
+    allowedEmails: string[];
     clientId: string;
     clientSecret: string;
     redirectUri: string;
@@ -113,6 +114,7 @@ export function loadConfig(): AppConfig {
       email: getOptionalEnv("SIMPLIFI_EMAIL"),
       password: getOptionalEnv("SIMPLIFI_PASSWORD"),
       datasetId: getOptionalEnv("SIMPLIFI_DATASET_ID"),
+      allowedEmails: parseRedirectAllowlist(process.env.ALLOWED_EMAIL ?? "").map((e) => e.toLowerCase()),
       clientId: process.env.SIMPLIFI_CLIENT_ID ?? "acme_web",
       clientSecret: process.env.SIMPLIFI_CLIENT_SECRET ?? "BCDCxXwdWYcj@bK6",
       redirectUri: process.env.SIMPLIFI_REDIRECT_URI ?? "https://simplifi.quicken.com/login",

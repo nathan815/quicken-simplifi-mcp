@@ -90,6 +90,13 @@ export class SimplifiAuthService {
    * If MFA is required, returns a pendingId that must be resolved via completeMfaLogin().
    */
   public async attemptLoginWithCredentials(loginEmail: string, loginPassword: string): Promise<AttemptLoginResult> {
+    // Single-user server: refuse other accounts before anything is sent to Quicken, so a stranger
+    // can't replace the stored session.
+    if (this.config.allowedEmails.length > 0 && !this.config.allowedEmails.includes(loginEmail.trim().toLowerCase())) {
+      logWarn("Login rejected: email not in ALLOWED_EMAIL");
+      throw new Error("This account is not allowed to use this server.");
+    }
+
     const threatMetrixSessionId = randomUUID();
     const authorizeResponse = await this.callAuthorize({
       email: loginEmail,

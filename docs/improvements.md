@@ -63,7 +63,7 @@ The upstream server implemented a full OAuth 2.0 Authorization Code + PKCE serve
 
 ### What we added
 
-A `MCP_API_KEY` environment variable. When set, the server skips all JWT validation and accepts that value as a static bearer token:
+An optional `MCP_API_KEY` environment variable. When set, `/mcp` accepts that value as a static bearer token (constant-time comparison) **in addition to** normal OAuth JWTs, so OAuth clients like Claude.ai keep working. Setting it also enables the `/connect` login page (see section 4):
 
 ```bash
 MCP_API_KEY=<any-random-string>
@@ -78,13 +78,9 @@ claude mcp add simplifi --transport http http://localhost:8787/mcp \
 
 ### What becomes optional
 
-When `MCP_API_KEY` is set, these env vars are no longer required:
+When `MCP_API_KEY` is set, `OAUTH_JWT_SECRET` is optional (a random per-process secret is used if it is unset, so OAuth tokens do not survive a restart). `OAUTH_LOGIN_USERNAME` / `OAUTH_LOGIN_PASSWORD` no longer exist: the OAuth authorize page signs in with your Quicken email and password (see `docs/plan-unified-oauth.md`).
 
-- `OAUTH_JWT_SECRET`
-- `OAUTH_LOGIN_USERNAME`
-- `OAUTH_LOGIN_PASSWORD`
-
-The full OAuth server is still present and works unchanged — `MCP_API_KEY` just bypasses it. For remote deployments or Claude.ai web, leave `MCP_API_KEY` unset and use the OAuth flow as normal.
+Clients that cannot run OAuth (e.g. an agent reaching the server over a private network) use the key. For Claude.ai web, which only supports OAuth, use the OAuth flow. Keep `HOST` bound to a private interface when the key is set.
 
 ---
 
@@ -112,10 +108,10 @@ The upstream server required `SIMPLIFI_EMAIL` and `SIMPLIFI_PASSWORD` in `.env`.
 
 ### What we added
 
-A `/connect` route that handles the entire Quicken auth flow in the browser:
+A `/connect` route that handles the Quicken auth flow in the browser. It is only served while `MCP_API_KEY` is set (otherwise it returns 404 and OAuth is the only way in):
 
-1. Server starts → detects no Simplifi tokens → opens `http://localhost:8787/connect` in the default browser automatically
-2. User sees a Simplifi-branded login form
+1. Open `http://localhost:8787/connect` yourself (the server no longer opens a browser)
+2. User sees a Simplifi-branded login form (CSRF nonce, rate limited to 5 attempts per 15 minutes)
 3. Credentials go directly from the browser form to Quicken's API (`POST /oauth/authorize`)
 4. If MFA is required, a verification code page is shown mid-flow
 5. On success, only the OAuth **tokens** are stored in SQLite — credentials are never written anywhere
@@ -123,11 +119,15 @@ A `/connect` route that handles the entire Quicken auth flow in the browser:
 
 `SIMPLIFI_EMAIL` and `SIMPLIFI_PASSWORD` are now **optional** in `.env`.
 
-### Auto-reopen on session expiry
+### Session expiry
 
-When `getAccessToken()` fails (refresh token expired, no credentials to fall back on), a debounced `triggerReauth()` fires, re-opening the browser to `/connect`. Multiple concurrent tool call failures produce only one browser open per 10 seconds.
+When the Quicken refresh token expires and there are no `.env` credentials to fall back on, `getAccessToken()` revokes all OAuth refresh tokens so OAuth clients re-run the login, and throws a "re-authenticate" error. Static-key users reconnect at `/connect`.
 
-**Files changed:** `src/http/server.ts` (new `/connect` and `/connect/mfa` routes), `src/simplifi/auth-service.ts` (`attemptLoginWithCredentials`, `onNeedsReauth`), `src/index.ts`
+### Restricting who can log in
+
+Set `ALLOWED_EMAIL` (comma separated) so only your Quicken account can complete `/oauth/authorize` or `/connect`. Without it, any valid Quicken login replaces the stored session.
+
+**Files changed:** `src/http/server.ts` (gated `/connect` and `/connect/mfa` routes), `src/simplifi/auth-service.ts` (`attemptLoginWithCredentials`, allowed-email check)
 
 ---
 
@@ -139,7 +139,7 @@ yarn setup
 
 Generates a random `MCP_API_KEY`, writes it to `.env`, and prints the exact `claude mcp add` command. No manual `.env` editing required for a first-time setup.
 
-After running `yarn setup`, build and start the server with `yarn build && yarn start` — it auto-opens the browser for the Quicken connect flow.
+After running `yarn setup`, build and start the server with `yarn build && yarn start`, then open `http://localhost:8787/connect` to sign in to Quicken.
 
 ---
 
@@ -163,10 +163,10 @@ Everything else is auto-detected or handled interactively.
 | `src/config.ts` | Made `SIMPLIFI_EMAIL`, `PASSWORD`, `DATASET_ID`, and all OAuth fields optional; added `MCP_API_KEY` / `staticApiKey` |
 | `src/db/database.ts` | Added `simplifi_config` table; `getDatasetId`/`saveDatasetId`; `listTransactionsByTag` |
 | `src/simplifi/client.ts` | Dynamic dataset ID resolution; `listDatasets()`; `authedRequestNoDataset()` |
-| `src/simplifi/auth-service.ts` | `attemptLoginWithCredentials()`; `onNeedsReauth()` callback; debounced reauth; optional config credentials |
+| `src/simplifi/auth-service.ts` | `attemptLoginWithCredentials()` (with `ALLOWED_EMAIL` check); OAuth token revocation on session expiry; optional config credentials |
 | `src/services/transaction-tool-service.ts` | `createTag`, `tagTransaction`, `untagTransaction`, `setTransactionTags`, `setTransactionMemo`, `listTransactionsByTag` |
 | `src/mcp/server.ts` | 6 new tool registrations |
-| `src/http/server.ts` | `/connect` and `/connect/mfa` routes; static API key middleware |
-| `src/index.ts` | `openConnectPage()`; auto-open on first run; `onNeedsReauth` registration |
+| `src/http/server.ts` | `/connect` and `/connect/mfa` routes (only with `MCP_API_KEY`); static key or JWT on `/mcp`; Quicken login on `/oauth/authorize` |
+| `src/index.ts` | Readiness/sync wiring (no browser auto-open) |
 | `src/setup.ts` | New file — setup wizard |
 | `docs/` | New directory — this file and auth plan |

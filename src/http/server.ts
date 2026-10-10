@@ -492,6 +492,11 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     host: address.address,
     port: address.port,
   });
+  logInfo("Auth configuration", {
+    staticApiKey: config.oauth.staticApiKey ? "enabled" : "disabled",
+    connectPage: config.oauth.staticApiKey ? "enabled" : "disabled (requires MCP_API_KEY)",
+    allowedEmailRestriction: config.simplifi.allowedEmails.length > 0 ? "enabled" : "disabled",
+  });
 
   return {
     close: async () => {

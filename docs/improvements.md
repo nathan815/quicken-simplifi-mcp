@@ -129,6 +129,8 @@ When the Quicken refresh token expires and there are no `.env` credentials to fa
 
 Set `ALLOWED_EMAIL` (comma separated) so only your Quicken account can complete `/oauth/authorize` or `/connect`. Without it, any valid Quicken login replaces the stored session.
 
+Sign-in attempts are rate limited: `/oauth/authorize` allows 5 failed logins and `/oauth/mfa` 10 code attempts per 15 minutes (`/connect` has its own limit). The limits are one global bucket rather than per client, because behind a tunnel all requests share the proxy's address.
+
 **Files changed:** `src/http/server.ts` (gated `/connect` and `/connect/mfa` routes), `src/simplifi/auth-service.ts` (`attemptLoginWithCredentials`, allowed-email check)
 
 ---

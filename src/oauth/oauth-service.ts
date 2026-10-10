@@ -87,11 +87,12 @@ export class OAuthService {
     return {
       client_id: "mcp-client",
       client_id_issued_at: Math.floor(Date.now() / 1000),
+      ...(typeof raw.client_name === "string" ? { client_name: raw.client_name } : {}),
       redirect_uris: redirectUris,
       grant_types: grantTypes,
       response_types: ["code"],
       token_endpoint_auth_method: "none",
-      registration_client_uri: `${baseUrl}/oauth/register`,
+      ...(typeof raw.scope === "string" ? { scope: raw.scope } : {}),
     };
   }
 

@@ -86,6 +86,22 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     return `${proto}://${host}`;
   };
 
+  // Request log for the auth/discovery surface only (no query strings or bodies, which can hold codes).
+  app.use((req, res, next) => {
+    if (/^\/(oauth|\.well-known|mcp)/.test(req.path)) {
+      res.on("finish", () => {
+        logInfo("request", {
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          origin: req.header("origin"),
+          userAgent: req.header("user-agent")?.slice(0, 80),
+        });
+      });
+    }
+    next();
+  });
+
   app.disable("x-powered-by");
   app.use(
     cors({
@@ -113,6 +129,24 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     res.status(200).json(oauthService.getMetadata(baseUrl(req)));
   });
 
+  // Guard the Quicken sign-in against password/MFA guessing through this server. Behind a tunnel every
+  // client shares the proxy's address, so these act as one global bucket, which suits a single-user server.
+  const attemptLimiter = (limit: number, skipSuccessfulRequests: boolean) =>
+    rateLimit({
+      windowMs: 15 * 60 * 1000,
+      limit,
+      skipSuccessfulRequests,
+      standardHeaders: true,
+      legacyHeaders: false,
+      validate: { xForwardedForHeader: false },
+      handler: (_req, res) => {
+        res.status(429).type("text/plain").send("Too many sign-in attempts. Try again later.");
+      },
+    });
+  // Failed logins come back as 4xx, so only those count; a code check always answers 200, so count them all.
+  const authorizeRateLimit = attemptLimiter(5, true);
+  const mfaRateLimit = attemptLimiter(10, false);
+
   app.get("/oauth/authorize", (req, res) => {
     try {
       const request = oauthService.parseAuthorizeRequest(toRecord(req.query));
@@ -123,11 +157,13 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
   });
 
   app.post("/oauth/register", (req, res) => {
+    // Registration bodies are client metadata (no secrets); log them to debug client compatibility.
+    logInfo("OAuth client registration", { body: toRecord(req.body), userAgent: req.header("user-agent") });
     const response = oauthService.buildClientRegistrationResponse(toRecord(req.body), baseUrl(req));
     res.status(201).json(response);
   });
 
-  app.post("/oauth/authorize", async (req, res) => {
+  app.post("/oauth/authorize", authorizeRateLimit, async (req, res) => {
     try {
       const request = oauthService.parseAuthorizeRequest(toRecord(req.body));
       const email = typeof req.body.email === "string" ? req.body.email.trim() : "";
@@ -158,7 +194,7 @@ export async function startHttpServer(deps: HttpServerDeps): Promise<RunningHttp
     }
   });
 
-  app.post("/oauth/mfa", async (req, res) => {
+  app.post("/oauth/mfa", mfaRateLimit, async (req, res) => {
     try {
       const request = oauthService.parseAuthorizeRequest(toRecord(req.body));
       const pendingId = typeof req.body.pending_mfa_id === "string" ? req.body.pending_mfa_id : "";

@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
+
 import { DatabaseContext, type TransactionQuery } from "../db/database.js";
-import type { Tag, TagRef, Transaction, TransactionFilters } from "../types.js";
+import type { Account, Tag, TagRef, Transaction, TransactionFilters } from "../types.js";
 import { deepMerge } from "../utils.js";
 import { SimplifiClient } from "../simplifi/client.js";
 import { SyncService } from "../sync/sync-service.js";
@@ -104,6 +106,111 @@ export class TransactionToolService {
     return {
       mutation,
       transaction: merged,
+    };
+  }
+
+  public async createTransaction(input: {
+    accountId: string;
+    date: string;
+    amount: number;
+    payee: string;
+    memo?: string;
+    categoryId?: string;
+  }): Promise<Record<string, unknown>> {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+      throw new Error("date must be in YYYY-MM-DD format");
+    }
+
+    const accounts = await this.fetchAccounts();
+    if (!accounts.some((a) => a.id === input.accountId)) {
+      throw new Error(`Account ${input.accountId} not found; use list_accounts to find a valid account id`);
+    }
+
+    // Borrow source/state/matchState/type conventions from an existing transaction in the
+    // same account (preferring the same sign), since the API requires them.
+    await this.syncService.ensureFresh(this.maxStaleMs);
+    const recent = this.db.listTransactions({ limit: 50, accountId: input.accountId }).items;
+    const template = recent.find((t) => Math.sign(t.amount ?? 0) === Math.sign(input.amount)) ?? recent[0];
+
+    const clientId = randomUUID();
+    const transaction: Transaction = {
+      id: clientId,
+      clientId,
+      accountId: input.accountId,
+      postedOn: input.date,
+      payee: input.payee,
+      amount: input.amount,
+      memo: input.memo ?? "",
+      coa: input.categoryId ? { type: "CATEGORY", id: input.categoryId } : { type: "UNCATEGORIZED", id: "0" },
+      source: template?.source ?? "MANUAL",
+      state: template?.state ?? "CLEARED",
+      matchState: template?.matchState ?? "NOT_MATCHED",
+      type: template?.type ?? (input.amount < 0 ? "DEBIT" : "CREDIT"),
+      tags: [],
+      isDeleted: false,
+    };
+    this.assertUpsertRequiredFields(transaction);
+
+    const mutation = await this.simplifiClient.createTransaction(transaction);
+    const id = mutation.id ?? clientId;
+    const created = { ...transaction, id };
+    this.db.upsertTransactions([created]);
+
+    return { transactionId: id, mutation, transaction: created };
+  }
+
+  public async listAccounts(): Promise<Record<string, unknown>> {
+    const accounts = await this.fetchAccounts();
+    return { accounts: accounts.map((a) => this.summarizeAccount(a)) };
+  }
+
+  public async getAccount(input: { accountId?: string; name?: string }): Promise<Record<string, unknown>> {
+    if (!input.accountId && !input.name) {
+      throw new Error("Either accountId or name is required");
+    }
+    const accounts = await this.fetchAccounts();
+    let matches: Account[];
+    if (input.accountId) {
+      matches = accounts.filter((a) => a.id === input.accountId);
+    } else {
+      const wanted = input.name!.trim().toLowerCase();
+      matches = accounts.filter((a) => a.name?.trim().toLowerCase() === wanted);
+      if (matches.length === 0) {
+        matches = accounts.filter((a) => a.name?.toLowerCase().includes(wanted));
+      }
+    }
+    if (matches.length === 0) {
+      throw new Error(`Account not found: ${input.accountId ?? input.name}`);
+    }
+    if (matches.length > 1) {
+      throw new Error(
+        `Multiple accounts match: ${matches.map((a) => `${a.name} (${a.id})`).join(", ")}. Use accountId.`,
+      );
+    }
+    return { account: this.summarizeAccount(matches[0]!), raw: matches[0] };
+  }
+
+  private async fetchAccounts(): Promise<Account[]> {
+    const response = await this.simplifiClient.listAccounts();
+    return (response.resources ?? []).filter((a) => !a.isDeleted);
+  }
+
+  // Account payloads are only partially documented, so balance/as-of are picked
+  // from the first populated candidate field; the full payload is available via get_account.
+  private summarizeAccount(account: Account): Record<string, unknown> {
+    const pick = (keys: string[]): unknown => {
+      for (const key of keys) {
+        const value = account[key];
+        if (value !== undefined && value !== null) return value;
+      }
+      return undefined;
+    };
+    return {
+      id: account.id,
+      name: account.name,
+      type: account.type,
+      balance: pick(["currentBalance", "balance", "currentBal", "availableBalance"]),
+      balanceAsOf: pick(["balanceAsOf", "currentBalanceAsOf", "balanceUpdatedAt", "lastUpdatedAt", "modifiedAt"]),
     };
   }
 

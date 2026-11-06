@@ -78,6 +78,18 @@ export interface Transaction {
   [key: string]: unknown;
 }
 
+export interface Account {
+  id?: string;
+  name?: string;
+  type?: string;
+  [key: string]: unknown;
+}
+
+export interface AccountListResponse {
+  metaData?: MetaData;
+  resources?: Account[];
+}
+
 export interface TransactionListResponse {
   metaData: MetaData;
   resources: Transaction[];

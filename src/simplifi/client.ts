@@ -2,6 +2,7 @@ import { URL } from "node:url";
 
 import type { AppConfig } from "../config.js";
 import type {
+  AccountListResponse,
   CategoryListResponse,
   DatasetListResponse,
   EarliestDateOnResponse,
@@ -114,6 +115,20 @@ export class SimplifiClient {
       method: "PUT",
       body: JSON.stringify(payload),
     });
+  }
+
+  public async createTransaction(payload: Transaction): Promise<TransactionMutationResponse> {
+    const url = new URL("/transactions", this.config.baseUrl);
+    return this.authedRequest<TransactionMutationResponse>(url.toString(), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
+  public async listAccounts(): Promise<AccountListResponse> {
+    const url = new URL("/accounts", this.config.baseUrl);
+    url.searchParams.set("limit", "5000");
+    return this.authedRequest<AccountListResponse>(url.toString(), { method: "GET" });
   }
 
   public async listCategories(input: ListReferenceInput = {}): Promise<CategoryListResponse> {

@@ -162,6 +162,17 @@ export class TransactionToolService {
     return { tag };
   }
 
+  public async listAccounts(input?: { refresh?: boolean; limit?: number }): Promise<Record<string, unknown>> {
+    if (input?.refresh) {
+      await this.referenceDataService.syncAccounts();
+    } else {
+      await this.referenceDataService.ensureAccountsFresh(this.maxStaleMs);
+    }
+
+    const accounts = this.db.listAccounts({ limit: input?.limit });
+    return { accounts };
+  }
+
   public async listTags(input?: { refresh?: boolean; limit?: number }): Promise<Record<string, unknown>> {
     if (input?.refresh) {
       await this.referenceDataService.syncTags();

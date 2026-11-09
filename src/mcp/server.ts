@@ -120,6 +120,16 @@ export function createMcpServer(
   );
 
   tool(
+    "list_accounts",
+    "List Simplifi accounts (name, type, id) so transaction accountId values can be mapped to real account names (synced and cached locally).",
+    {
+      refresh: z.boolean().optional(),
+      limit: z.coerce.number().int().min(1).max(5000).optional(),
+    },
+    (input) => toolService.listAccounts(input),
+  );
+
+  tool(
     "list_categories",
     "List Simplifi categories (synced and cached locally).",
     {

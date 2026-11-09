@@ -44,7 +44,7 @@ export class TransactionToolService {
     return {
       total: page.total,
       nextCursor: page.nextCursor,
-      items: page.items,
+      items: await this.withAccountNames(page.items),
     };
   }
 
@@ -59,7 +59,7 @@ export class TransactionToolService {
     return {
       total: page.total,
       nextCursor: page.nextCursor,
-      items: page.items,
+      items: await this.withAccountNames(page.items),
     };
   }
 
@@ -76,7 +76,7 @@ export class TransactionToolService {
       throw new Error(`Transaction ${input.transactionId} not found in cache`);
     }
 
-    return { transaction };
+    return { transaction: (await this.withAccountNames([transaction]))[0] };
   }
 
   public async updateTransaction(input: UpdateTransactionInput): Promise<Record<string, unknown>> {
@@ -103,7 +103,7 @@ export class TransactionToolService {
 
     return {
       mutation,
-      transaction: merged,
+      transaction: (await this.withAccountNames([merged]))[0],
     };
   }
 
@@ -123,7 +123,7 @@ export class TransactionToolService {
     return {
       total: page.total,
       nextCursor: page.nextCursor,
-      items: page.items,
+      items: await this.withAccountNames(page.items),
     };
   }
 
@@ -291,7 +291,7 @@ export class TransactionToolService {
     return {
       total: page.total,
       nextCursor: page.nextCursor,
-      items: page.items,
+      items: await this.withAccountNames(page.items),
     };
   }
 
@@ -314,6 +314,32 @@ export class TransactionToolService {
     });
 
     return { suggestions };
+  }
+
+  /**
+   * Return copies of the transactions with a read-only `accountName` added, looked up from the
+   * cached accounts. Never mutates the originals: they are merged and sent back to Simplifi on
+   * update, and must not carry this derived field. A failed account sync must not break the
+   * transaction tools, so fall back to whatever is already cached.
+   */
+  private async withAccountNames(items: Transaction[]): Promise<Transaction[]> {
+    try {
+      await this.referenceDataService.ensureAccountsFresh(this.maxStaleMs);
+    } catch {
+      // Already logged by the reference data service.
+    }
+
+    const names = new Map<string, string>();
+    for (const account of this.db.listAccounts({})) {
+      if (typeof account.id === "string" && typeof account.name === "string") {
+        names.set(account.id, account.name);
+      }
+    }
+
+    return items.map((item) => {
+      const name = typeof item.accountId === "string" ? names.get(item.accountId) : undefined;
+      return name ? { ...item, accountName: name } : item;
+    });
   }
 
   private async maybeRefresh(forceRefresh: boolean): Promise<void> {

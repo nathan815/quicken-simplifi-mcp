@@ -173,7 +173,7 @@ Inputs:
 - `refresh` (optional)
 - `limit` (optional, 1-5000)
 
-Returns cached Simplifi accounts (id, name, type) so the `accountId` on transactions can be mapped to an account name.
+Returns cached Simplifi accounts (id, name, type) so the `accountId` on transactions can be mapped to an account name. Transaction results also include a read-only `accountName` field when the account is known.
 
 ### `list_categories`
 Inputs:

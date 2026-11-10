@@ -145,6 +145,20 @@ export class SimplifiClient {
     return this.authedRequest<CategoryListResponse>(url.toString(), { method: "GET" });
   }
 
+  public async listAccounts(input: ListReferenceInput = {}): Promise<AccountListResponse> {
+    const url = new URL("/accounts", this.config.baseUrl);
+    url.searchParams.set("limit", String(input.limit ?? 5000));
+    if (input.modifiedAfter) {
+      url.searchParams.set("modifiedAfter", input.modifiedAfter);
+    }
+    return this.authedRequest<AccountListResponse>(url.toString(), { method: "GET" });
+  }
+
+  public async listAccountsFromNextLink(nextLink: string): Promise<AccountListResponse> {
+    const url = new URL(nextLink, this.config.baseUrl);
+    return this.authedRequest<AccountListResponse>(url.toString(), { method: "GET" });
+  }
+
   public async createTag(name: string): Promise<Tag> {
     const url = new URL("/tags", this.config.baseUrl);
     return this.authedRequest<Tag>(url.toString(), {

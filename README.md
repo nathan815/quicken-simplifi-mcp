@@ -10,6 +10,7 @@ It provides MCP tools:
 - `categorize_transaction`
 - `list_uncategorized_transactions`
 - `search_merchants`
+- `list_accounts` — map transaction `accountId` values to account names
 - `list_categories` / `search_categories`
 - `list_tags` / `search_tags`
 - `create_tag` — create a Simplifi tag
@@ -166,6 +167,13 @@ Inputs:
 - `includeDeleted` (optional)
 
 Returns merchant name suggestions derived from cached transactions (grouped and counted).
+
+### `list_accounts`
+Inputs:
+- `refresh` (optional)
+- `limit` (optional, 1-5000)
+
+Returns cached Simplifi accounts (id, name, type) so the `accountId` on transactions can be mapped to an account name. Transaction results also include a read-only `accountName` field when the account is known.
 
 ### `list_categories`
 Inputs:

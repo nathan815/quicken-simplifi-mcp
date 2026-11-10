@@ -41,6 +41,18 @@ export interface Tag {
   [key: string]: unknown;
 }
 
+export interface Account {
+  id?: string;
+  name?: string;
+  type?: string;
+  accountType?: string;
+  institutionName?: string;
+  lastFour?: string;
+  createdAt?: string;
+  modifiedAt?: string;
+  [key: string]: unknown;
+}
+
 export interface CoaRef {
   type?: string;
   id?: string;
@@ -103,6 +115,11 @@ export interface CategoryListResponse {
 export interface TagListResponse {
   metaData: MetaData;
   resources: Tag[];
+}
+
+export interface AccountListResponse {
+  metaData: MetaData;
+  resources: Account[];
 }
 
 export interface Dataset {

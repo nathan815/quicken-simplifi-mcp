@@ -2,6 +2,7 @@ import { URL } from "node:url";
 
 import type { AppConfig } from "../config.js";
 import type {
+  AccountListResponse,
   CategoryListResponse,
   DatasetListResponse,
   EarliestDateOnResponse,
@@ -116,6 +117,14 @@ export class SimplifiClient {
     });
   }
 
+  public async createTransaction(payload: Transaction): Promise<TransactionMutationResponse> {
+    const url = new URL("/transactions", this.config.baseUrl);
+    return this.authedRequest<TransactionMutationResponse>(url.toString(), {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+  }
+
   public async listCategories(input: ListReferenceInput = {}): Promise<CategoryListResponse> {
     const url = new URL("/categories", this.config.baseUrl);
     url.searchParams.set("limit", String(input.limit ?? 5000));
@@ -128,6 +137,20 @@ export class SimplifiClient {
   public async listCategoriesFromNextLink(nextLink: string): Promise<CategoryListResponse> {
     const url = new URL(nextLink, this.config.baseUrl);
     return this.authedRequest<CategoryListResponse>(url.toString(), { method: "GET" });
+  }
+
+  public async listAccounts(input: ListReferenceInput = {}): Promise<AccountListResponse> {
+    const url = new URL("/accounts", this.config.baseUrl);
+    url.searchParams.set("limit", String(input.limit ?? 5000));
+    if (input.modifiedAfter) {
+      url.searchParams.set("modifiedAfter", input.modifiedAfter);
+    }
+    return this.authedRequest<AccountListResponse>(url.toString(), { method: "GET" });
+  }
+
+  public async listAccountsFromNextLink(nextLink: string): Promise<AccountListResponse> {
+    const url = new URL(nextLink, this.config.baseUrl);
+    return this.authedRequest<AccountListResponse>(url.toString(), { method: "GET" });
   }
 
   public async createTag(name: string): Promise<Tag> {

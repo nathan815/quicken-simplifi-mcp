@@ -35,6 +35,46 @@ export class ReferenceDataService {
     await this.syncTags();
   }
 
+  public async ensureAccountsFresh(maxAgeMs: number): Promise<void> {
+    const lastSyncAt = this.db.getAccountsLastSyncAt();
+    if (lastSyncAt) {
+      const ageMs = Date.now() - new Date(lastSyncAt).getTime();
+      if (ageMs <= maxAgeMs) {
+        return;
+      }
+    }
+
+    await this.syncAccounts();
+  }
+
+  public async syncAccounts(): Promise<void> {
+    try {
+      let nextLink: string | undefined;
+      let total = 0;
+      let pages = 0;
+
+      do {
+        const payload = nextLink
+          ? await this.client.listAccountsFromNextLink(nextLink)
+          : await this.client.listAccounts({ limit: 5000 });
+
+        pages += 1;
+        total += payload.resources.length;
+        this.db.upsertAccounts(payload.resources);
+
+        nextLink = payload.metaData.nextLink;
+      } while (nextLink);
+
+      this.db.saveAccountsLastSyncAt(nowIso());
+      logInfo("Synced accounts", { pages, total });
+    } catch (error) {
+      logError("Account sync failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  }
+
   public async syncCategories(): Promise<void> {
     try {
       let nextLink: string | undefined;

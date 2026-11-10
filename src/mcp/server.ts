@@ -82,6 +82,31 @@ export function createMcpServer(
   );
 
   tool(
+    "create_transaction",
+    "Create a new transaction in a Simplifi account (e.g. a manual account). Amount is signed (negative = money out). Returns the new transaction id.",
+    {
+      accountId: z.string().min(1),
+      date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "YYYY-MM-DD"),
+      amount: z.number(),
+      payee: z.string().trim().min(1),
+      memo: z.string().optional(),
+      categoryId: z.string().optional(),
+    },
+    (input) => toolService.createTransaction(input),
+  );
+
+  tool(
+    "get_account",
+    "Get one account by accountId or name (exact, then substring match), including balance, as-of date and the raw payload.",
+    {
+      accountId: z.string().optional(),
+      name: z.string().optional(),
+      refresh: z.boolean().optional(),
+    },
+    (input) => toolService.getAccount(input),
+  );
+
+  tool(
     "categorize_transaction",
     "Convenience wrapper to set a transaction category (sets coa.type=CATEGORY and coa.id=<categoryId>).",
     {
@@ -117,6 +142,16 @@ export function createMcpServer(
       includeDeleted: z.boolean().optional(),
     },
     (input) => toolService.searchMerchants(input),
+  );
+
+  tool(
+    "list_accounts",
+    "List Simplifi accounts (id, name, type, current balance, balance as-of date) so accountId values map to names (synced and cached locally; pass refresh for a live balance).",
+    {
+      refresh: z.boolean().optional(),
+      limit: z.coerce.number().int().min(1).max(5000).optional(),
+    },
+    (input) => toolService.listAccounts(input),
   );
 
   tool(

@@ -4,6 +4,7 @@ import path from "node:path";
 import BetterSqlite3 from "better-sqlite3";
 
 import type {
+  Account,
   Category,
   SimplifiTokenRow,
   SimplifiTokenSet,
@@ -83,6 +84,10 @@ interface CategoryRow {
 }
 
 interface TagRow {
+  raw_json: string;
+}
+
+interface AccountRow {
   raw_json: string;
 }
 
@@ -203,6 +208,16 @@ export class DatabaseContext {
       );
       CREATE INDEX IF NOT EXISTS idx_tags_name ON tags (name);
 
+      CREATE TABLE IF NOT EXISTS accounts (
+        id TEXT PRIMARY KEY,
+        name TEXT,
+        type TEXT,
+        modified_at TEXT,
+        raw_json TEXT NOT NULL,
+        cached_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_accounts_name ON accounts (name);
+
       CREATE TABLE IF NOT EXISTS simplifi_config (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
@@ -318,7 +333,8 @@ export class DatabaseContext {
         DELETE FROM transactions;
         DELETE FROM categories;
         DELETE FROM tags;
-        DELETE FROM simplifi_config WHERE key = 'dataset_id';
+        DELETE FROM accounts;
+        DELETE FROM simplifi_config WHERE key IN ('dataset_id', 'accounts_last_sync_at');
         UPDATE sync_state SET date_on_after = NULL, last_as_of = NULL, last_full_sync_at = NULL,
           last_sync_at = NULL, sync_status = NULL, last_error = NULL WHERE id = 1;
         UPDATE reference_sync_state SET categories_last_as_of = NULL, categories_last_sync_at = NULL,
@@ -1023,6 +1039,61 @@ export class DatabaseContext {
           .all(limit) as TagRow[]));
 
     return rows.map((row) => JSON.parse(row.raw_json) as Tag);
+  }
+
+  public getAccountsLastSyncAt(): string | null {
+    const row = this.db.prepare(`SELECT value FROM simplifi_config WHERE key = 'accounts_last_sync_at'`).get() as { value: string } | undefined;
+    return row?.value ?? null;
+  }
+
+  public saveAccountsLastSyncAt(timestamp: string): void {
+    this.db.prepare(`INSERT INTO simplifi_config (key, value) VALUES ('accounts_last_sync_at', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(timestamp);
+  }
+
+  public upsertAccounts(accounts: Account[]): void {
+    if (accounts.length === 0) {
+      return;
+    }
+
+    const statement = this.db.prepare(`
+      INSERT INTO accounts (id, name, type, modified_at, raw_json, cached_at)
+      VALUES (@id, @name, @type, @modifiedAt, @rawJson, @cachedAt)
+      ON CONFLICT(id) DO UPDATE SET
+        name = excluded.name,
+        type = excluded.type,
+        modified_at = excluded.modified_at,
+        raw_json = excluded.raw_json,
+        cached_at = excluded.cached_at
+    `);
+
+    const run = this.db.transaction((items: Account[]) => {
+      const cachedAt = nowIso();
+      for (const item of items) {
+        const id = typeof item.id === "string" ? item.id : "";
+        if (!id) {
+          continue;
+        }
+
+        statement.run({
+          id,
+          name: typeof item.name === "string" ? item.name : null,
+          type: typeof item.type === "string" ? item.type : typeof item.accountType === "string" ? item.accountType : null,
+          modifiedAt: typeof item.modifiedAt === "string" ? item.modifiedAt : null,
+          rawJson: JSON.stringify(item),
+          cachedAt,
+        });
+      }
+    });
+
+    run(accounts);
+  }
+
+  public listAccounts(query?: { limit?: number }): Account[] {
+    const limit = Math.min(Math.max(query?.limit ?? 5000, 1), 5000);
+    const rows = this.db
+      .prepare(`SELECT raw_json FROM accounts ORDER BY name ASC LIMIT ?`)
+      .all(limit) as AccountRow[];
+    return rows.map((row) => JSON.parse(row.raw_json) as Account);
   }
 
   public listTransactionsByTag(query: TransactionQuery & { tagId: string }): TransactionPage {

@@ -121,7 +121,7 @@ export class TransactionToolService {
       throw new Error("date must be in YYYY-MM-DD format");
     }
 
-    const accounts = await this.fetchAccounts();
+    const accounts = await this.loadAccounts();
     if (!accounts.some((a) => a.id === input.accountId)) {
       throw new Error(`Account ${input.accountId} not found; use list_accounts to find a valid account id`);
     }
@@ -159,16 +159,11 @@ export class TransactionToolService {
     return { transactionId: id, mutation, transaction: created };
   }
 
-  public async listAccounts(): Promise<Record<string, unknown>> {
-    const accounts = await this.fetchAccounts();
-    return { accounts: accounts.map((a) => this.summarizeAccount(a)) };
-  }
-
-  public async getAccount(input: { accountId?: string; name?: string }): Promise<Record<string, unknown>> {
+  public async getAccount(input: { accountId?: string; name?: string; refresh?: boolean }): Promise<Record<string, unknown>> {
     if (!input.accountId && !input.name) {
       throw new Error("Either accountId or name is required");
     }
-    const accounts = await this.fetchAccounts();
+    const accounts = await this.loadAccounts(input.refresh);
     let matches: Account[];
     if (input.accountId) {
       matches = accounts.filter((a) => a.id === input.accountId);
@@ -190,9 +185,13 @@ export class TransactionToolService {
     return { account: this.summarizeAccount(matches[0]!), raw: matches[0] };
   }
 
-  private async fetchAccounts(): Promise<Account[]> {
-    const response = await this.simplifiClient.listAccounts();
-    return (response.resources ?? []).filter((a) => !a.isDeleted);
+  private async loadAccounts(refresh = false): Promise<Account[]> {
+    if (refresh) {
+      await this.referenceDataService.syncAccounts();
+    } else {
+      await this.referenceDataService.ensureAccountsFresh(this.maxStaleMs);
+    }
+    return this.db.listAccounts({}).filter((a) => !a.isDeleted);
   }
 
   // Account payloads are only partially documented, so balance/as-of are picked
@@ -276,7 +275,7 @@ export class TransactionToolService {
       await this.referenceDataService.ensureAccountsFresh(this.maxStaleMs);
     }
 
-    const accounts = this.db.listAccounts({ limit: input?.limit });
+    const accounts = this.db.listAccounts({ limit: input?.limit }).map((a) => this.summarizeAccount(a));
     return { accounts };
   }
 

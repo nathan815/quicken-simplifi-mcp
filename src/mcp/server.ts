@@ -96,18 +96,12 @@ export function createMcpServer(
   );
 
   tool(
-    "list_accounts",
-    "List Simplifi accounts with id, name, type, current balance and balance as-of date (fetched live).",
-    {},
-    () => toolService.listAccounts(),
-  );
-
-  tool(
     "get_account",
     "Get one account by accountId or name (exact, then substring match), including balance, as-of date and the raw payload.",
     {
       accountId: z.string().optional(),
       name: z.string().optional(),
+      refresh: z.boolean().optional(),
     },
     (input) => toolService.getAccount(input),
   );
@@ -152,7 +146,7 @@ export function createMcpServer(
 
   tool(
     "list_accounts",
-    "List Simplifi accounts (name, type, id) so transaction accountId values can be mapped to real account names (synced and cached locally).",
+    "List Simplifi accounts (id, name, type, current balance, balance as-of date) so accountId values map to names (synced and cached locally; pass refresh for a live balance).",
     {
       refresh: z.boolean().optional(),
       limit: z.coerce.number().int().min(1).max(5000).optional(),

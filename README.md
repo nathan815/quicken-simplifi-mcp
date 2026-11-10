@@ -10,7 +10,8 @@ It provides MCP tools:
 - `categorize_transaction`
 - `list_uncategorized_transactions`
 - `search_merchants`
-- `list_accounts` — map transaction `accountId` values to account names
+- `list_accounts` / `get_account` — account ids, names, balances and as-of dates
+- `create_transaction` — post a new transaction to an account
 - `list_categories` / `search_categories`
 - `list_tags` / `search_tags`
 - `create_tag` — create a Simplifi tag
@@ -173,7 +174,21 @@ Inputs:
 - `refresh` (optional)
 - `limit` (optional, 1-5000)
 
-Returns cached Simplifi accounts (id, name, type) so the `accountId` on transactions can be mapped to an account name. Transaction results also include a read-only `accountName` field when the account is known.
+Returns cached Simplifi accounts (id, name, type, balance, balanceAsOf) so the `accountId` on transactions can be mapped to an account name. Pass `refresh` for a live balance. Transaction results also include a read-only `accountName` field when the account is known.
+
+### `get_account`
+Inputs:
+- `accountId` or `name` (exact match first, then substring; errors if ambiguous)
+- `refresh` (optional)
+
+Returns the account summary plus the raw Simplifi payload.
+
+### `create_transaction`
+Inputs:
+- `accountId`, `date` (YYYY-MM-DD), `amount` (signed; negative = money out), `payee`
+- `memo`, `categoryId` (optional)
+
+Creates the transaction and returns its `transactionId`.
 
 ### `list_categories`
 Inputs:

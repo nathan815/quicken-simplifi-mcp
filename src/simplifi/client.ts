@@ -125,12 +125,6 @@ export class SimplifiClient {
     });
   }
 
-  public async listAccounts(): Promise<AccountListResponse> {
-    const url = new URL("/accounts", this.config.baseUrl);
-    url.searchParams.set("limit", "5000");
-    return this.authedRequest<AccountListResponse>(url.toString(), { method: "GET" });
-  }
-
   public async listCategories(input: ListReferenceInput = {}): Promise<CategoryListResponse> {
     const url = new URL("/categories", this.config.baseUrl);
     url.searchParams.set("limit", String(input.limit ?? 5000));

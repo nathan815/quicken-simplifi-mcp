@@ -117,7 +117,7 @@ export class SimplifiClient {
     });
   }
 
-  public async createTransaction(payload: Transaction): Promise<TransactionMutationResponse> {
+  public async createTransaction(payload: Omit<Transaction, "id"> & { id?: string }): Promise<TransactionMutationResponse> {
     const url = new URL("/transactions", this.config.baseUrl);
     return this.authedRequest<TransactionMutationResponse>(url.toString(), {
       method: "POST",

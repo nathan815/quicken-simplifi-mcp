@@ -151,7 +151,13 @@ export class TransactionToolService {
     };
     this.assertUpsertRequiredFields(transaction);
 
-    const mutation = await this.simplifiClient.createTransaction(transaction);
+    // Simplifi assigns transaction ids itself (numeric) and rejects a
+    // client-generated UUID in the `id` field with 400 QCS-0400-8
+    // ("Invalid id ... for parameter id"). Send the create without `id`:
+    // the UUID stays in `clientId`, and the server-assigned id comes
+    // back on the mutation response.
+    const { id: _localId, ...createPayload } = transaction;
+    const mutation = await this.simplifiClient.createTransaction(createPayload);
     const id = mutation.id ?? clientId;
     const created = { ...transaction, id };
     this.db.upsertTransactions([created]);
